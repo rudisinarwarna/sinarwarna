@@ -16,7 +16,7 @@ import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const RECAPTCHA_SITE_KEY =
-  firebaseConfig.recaptchaSiteKey || '6LfZVSkuAAAAAB6eJGHMnknz9pyMIlNWSK0MQZzW';
+  firebaseConfig.recaptchaSiteKey || '6LcMqikuAAAAAJJd9jmIeHFeD54SdaqfapH5ilyz';
 
 const app = initializeApp({
   ...firebaseConfig,

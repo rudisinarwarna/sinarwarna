@@ -154,21 +154,34 @@ function formatGeminiError(err: unknown): { status: number; message: string } {
     };
   }
 
+  if (
+    (err as { name?: string })?.name === 'TimeoutError' ||
+    rawMessage.toLowerCase().includes('timeout')
+  ) {
+    return {
+      status: 504,
+      message: 'Waktu tunggu respons AI habis. Silakan klik Coba Lagi.',
+    };
+  }
+
   return { status, message: rawMessage };
 }
 
 function isTransientError(err: unknown): boolean {
-  const errObj = err as { status?: number; message?: string };
+  const errObj = err as { status?: number; message?: string; name?: string };
   const status = errObj?.status;
   const msg = errObj?.message || '';
   return (
     status === 503 ||
     status === 500 ||
     status === 429 ||
+    errObj?.name === 'TimeoutError' ||
+    errObj?.name === 'AbortError' ||
     msg.includes('503') ||
     msg.includes('UNAVAILABLE') ||
     msg.includes('high demand') ||
-    msg.includes('RESOURCE_EXHAUSTED')
+    msg.includes('RESOURCE_EXHAUSTED') ||
+    msg.toLowerCase().includes('timeout')
   );
 }
 
@@ -239,60 +252,73 @@ async function createApp() {
       res.setHeader('Cache-Control', 'no-cache, no-transform');
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders?.();
+      res.write(': connected\n\n');
 
       const primaryModel = 'gemini-4-hydrogen';
       const fallbackModel = 'gemini-3.1-flash-lite';
-      let stream: Awaited<ReturnType<typeof ai.models.generateContentStream>> | null = null;
+      let activeIterator: AsyncIterator<Awaited<ReturnType<typeof ai.models.generateContentStream>> extends AsyncIterable<infer T> ? T : never> | null = null;
+      let firstResult: IteratorResult<Awaited<ReturnType<typeof ai.models.generateContentStream>> extends AsyncIterable<infer T> ? T : never> | null = null;
       let lastErr: unknown;
 
-      const attempts: Array<{ model: string; level: ThinkingLevel; delayBeforeMs: number }> = [
-        { model: primaryModel, level: thinkingLevel, delayBeforeMs: 0 },
-        { model: primaryModel, level: thinkingLevel, delayBeforeMs: 450 },
+      const attempts: Array<{ model: string; level: ThinkingLevel; timeoutMs: number }> = [
+        { model: primaryModel, level: thinkingLevel, timeoutMs: 8500 },
         {
           model: fallbackModel,
           level: thinkingDepth === 'deep' ? ThinkingLevel.HIGH : ThinkingLevel.MINIMAL,
-          delayBeforeMs: 0,
+          timeoutMs: 25000,
         },
       ];
 
       for (const step of attempts) {
+        if (abortController.signal.aborted) break;
         if (lastErr && isRateLimitError(lastErr) && step.model === primaryModel) {
           continue;
         }
         try {
-          if (step.delayBeforeMs > 0) {
-            await sleep(step.delayBeforeMs, abortController.signal);
-          }
-          stream = await ai.models.generateContentStream({
+          const stepSignal = AbortSignal.any([
+            abortController.signal,
+            AbortSignal.timeout(step.timeoutMs),
+          ]);
+          const stream = await ai.models.generateContentStream({
             model: step.model,
             contents,
             config: {
               systemInstruction,
               thinkingConfig: { thinkingLevel: step.level },
-              abortSignal: abortController.signal,
+              abortSignal: stepSignal,
             },
           });
+          const iterator = stream[Symbol.asyncIterator]();
+          const first = await iterator.next();
+          activeIterator = iterator;
+          firstResult = first;
           break;
         } catch (attemptErr) {
           lastErr = attemptErr;
-          if ((attemptErr as Error)?.name === 'AbortError' || !isTransientError(attemptErr)) {
+          if (abortController.signal.aborted || !isTransientError(attemptErr)) {
             throw attemptErr;
           }
+          console.warn(
+            `[Sinar Warna /api/chat/stream] Fallback from ${step.model}:`,
+            (attemptErr as Error)?.name || (attemptErr as Error)?.message
+          );
         }
       }
 
-      if (!stream) {
+      if (!activeIterator || !firstResult) {
         throw lastErr || new Error('Gagal memulai aliran AI.');
       }
 
-      for await (const chunk of stream) {
+      let current = firstResult;
+      while (!current.done) {
         if (abortController.signal.aborted) {
           break;
         }
-        const chunkText = chunk.text;
+        const chunkText = current.value?.text;
         if (chunkText) {
           res.write(`data: ${JSON.stringify({ text: chunkText })}\n\n`);
         }
+        current = await activeIterator.next();
       }
 
       if (!abortController.signal.aborted) {
@@ -300,7 +326,7 @@ async function createApp() {
       }
       res.end();
     } catch (err) {
-      if ((err as Error)?.name === 'AbortError') {
+      if (abortController.signal.aborted && (err as Error)?.name === 'AbortError') {
         if (!res.writableEnded) {
           res.end();
         }
@@ -335,6 +361,7 @@ async function createApp() {
           contents: titlePrompt,
           config: {
             thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            abortSignal: AbortSignal.timeout(7000),
           },
         });
       } catch (err) {
@@ -344,6 +371,7 @@ async function createApp() {
           contents: titlePrompt,
           config: {
             thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+            abortSignal: AbortSignal.timeout(12000),
           },
         });
       }
