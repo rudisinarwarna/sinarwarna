@@ -2,15 +2,21 @@ import { initializeApp } from 'firebase/app';
 import { getAnalytics, isSupported, type Analytics } from 'firebase/analytics';
 import { initializeAppCheck, ReCaptchaV3Provider, type AppCheck } from 'firebase/app-check';
 import {
+  browserLocalPersistence,
   createUserWithEmailAndPassword,
   getAuth,
+  getRedirectResult,
   GoogleAuthProvider,
   OAuthProvider,
+  sendEmailVerification,
   sendPasswordResetEmail,
+  setPersistence,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   updateProfile,
+  type AuthProvider,
 } from 'firebase/auth';
 import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -43,10 +49,18 @@ if (typeof window !== 'undefined' && RECAPTCHA_SITE_KEY) {
 
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+auth.languageCode = 'id';
+if (typeof window !== 'undefined') {
+  void setPersistence(auth, browserLocalPersistence).catch(() => {
+    // Ignore persistence fallback issues in restricted storage modes
+  });
+}
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 export const appleProvider = new OAuthProvider('apple.com');
 appleProvider.addScope('email');
 appleProvider.addScope('name');
+appleProvider.setCustomParameters({ locale: 'id' });
 
 export let analytics: Analytics | null = null;
 void isSupported()
@@ -123,12 +137,41 @@ async function testConnection() {
 
 void testConnection();
 
+function isInIframe(): boolean {
+  try {
+    return typeof window !== 'undefined' && window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
+async function signInWithProviderSmart(provider: AuthProvider) {
+  try {
+    return await signInWithPopup(auth, provider);
+  } catch (err) {
+    const code = (err as { code?: string })?.code || '';
+    if (
+      !isInIframe() &&
+      (code === 'auth/popup-blocked' ||
+        code === 'auth/operation-not-supported-in-this-environment')
+    ) {
+      await signInWithRedirect(auth, provider);
+      return null;
+    }
+    throw err;
+  }
+}
+
+export async function consumeAuthRedirectResult() {
+  return getRedirectResult(auth);
+}
+
 export async function signInWithGoogle() {
-  return signInWithPopup(auth, googleProvider);
+  return signInWithProviderSmart(googleProvider);
 }
 
 export async function signInWithApple() {
-  return signInWithPopup(auth, appleProvider);
+  return signInWithProviderSmart(appleProvider);
 }
 
 export async function signInWithEmail(email: string, password: string) {
@@ -145,7 +188,25 @@ export async function signUpWithEmail(email: string, password: string, displayNa
       // Non-fatal profile display name update failure
     }
   }
+  if (!credential.user.emailVerified) {
+    try {
+      await sendEmailVerification(credential.user);
+    } catch {
+      // Non-fatal verification email send failure
+    }
+  }
   return credential;
+}
+
+export async function resendVerificationEmail() {
+  if (!auth.currentUser) return;
+  await sendEmailVerification(auth.currentUser);
+}
+
+export async function reloadCurrentUser() {
+  if (!auth.currentUser) return null;
+  await auth.currentUser.reload();
+  return auth.currentUser;
 }
 
 export async function resetPasswordWithEmail(email: string) {
@@ -179,11 +240,16 @@ export function formatAuthErrorIndonesia(err: unknown): string | null {
     case 'auth/network-request-failed':
       return 'Koneksi internet bermasalah. Periksa jaringan Anda lalu coba lagi.';
     case 'auth/account-exists-with-different-credential':
-      return 'Email ini sudah terhubung dengan metode masuk lain. Gunakan metode masuk yang sesuai.';
+      return 'Email ini sudah terhubung dengan metode masuk lain (misalnya Google/Email). Gunakan metode masuk yang sebelumnya Anda pakai.';
     case 'auth/operation-not-allowed':
-      return 'Metode login ini belum diaktifkan di konfigurasi Firebase Auth.';
+      return 'Metode login ini belum diaktifkan di Firebase Authentication Console.';
     case 'auth/unauthorized-domain':
-      return 'Domain ini belum diotorisasi di Firebase Authentication Console.';
+      return `Domain ${typeof window !== 'undefined' ? window.location.hostname : 'ini'} belum ditambahkan ke Authorized Domains di Firebase Authentication Console.`;
+    case 'auth/missing-or-invalid-nonce':
+    case 'auth/invalid-oauth-provider-id':
+      return 'Konfigurasi Apple Sign-In (Service ID / Key / Redirect URL) di Firebase Console perlu diperiksa kembali.';
+    case 'auth/internal-error':
+      return 'Terjadi gangguan konfigurasi login atau koneksi OAuth. Pastikan domain sudah terdaftar di Firebase Authorized Domains dan App Check reCAPTCHA mengizinkan domain ini.';
     default: {
       const msg = (err as { message?: string })?.message;
       return msg ? `Gagal masuk: ${msg}` : 'Terjadi kesalahan saat masuk. Silakan coba lagi.';

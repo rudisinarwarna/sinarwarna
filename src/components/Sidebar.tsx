@@ -20,6 +20,7 @@ interface SidebarProps {
   isMobileOpen: boolean;
   isDark: boolean;
   user: User | null;
+  isCloudUser?: boolean;
   authReady: boolean;
   authLoading: boolean;
   conversations: Conversation[];
@@ -39,6 +40,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isMobileOpen,
   isDark,
   user,
+  isCloudUser,
   authReady,
   authLoading,
   conversations,
@@ -120,7 +122,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex min-h-0 flex-1 flex-col border-t border-zinc-200/80 dark:border-[#242C44] px-3 pt-3">
         <div className="mb-2 flex items-center justify-between px-2">
           <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
-            {user ? 'Riwayat Cloud' : 'Riwayat Lokal'}
+            {(isCloudUser ?? Boolean(user))
+              ? 'Riwayat Cloud'
+              : user
+              ? 'Riwayat Lokal (Belum Verifikasi)'
+              : 'Riwayat Lokal'}
           </span>
           {conversations.length > 0 && (
             <span className="text-[11px] font-mono tabular-nums text-zinc-400 dark:text-zinc-500">

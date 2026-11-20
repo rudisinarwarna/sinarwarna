@@ -111,7 +111,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
     setInfoMessage(null);
     setLoadingMethod('google');
     try {
-      await signInWithGoogle();
+      const res = await signInWithGoogle();
+      if (!res) {
+        setInfoMessage('Mengalihkan ke halaman masuk Google...');
+      }
     } catch (err) {
       const formatted = formatAuthErrorIndonesia(err);
       if (formatted) setErrorMessage(formatted);
@@ -126,7 +129,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
     setInfoMessage(null);
     setLoadingMethod('apple');
     try {
-      await signInWithApple();
+      const res = await signInWithApple();
+      if (!res) {
+        setInfoMessage('Mengalihkan ke halaman masuk Apple...');
+      }
     } catch (err) {
       const formatted = formatAuthErrorIndonesia(err);
       if (formatted) setErrorMessage(formatted);

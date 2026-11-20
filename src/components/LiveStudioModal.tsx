@@ -29,7 +29,7 @@ const VOICE_OPTIONS: Array<{ id: VoicePersonaId; label: string }> = [
   { id: 'cynthia', label: 'Cynthia' },
   { id: 'awen', label: 'Awen' },
   { id: 'cyndi', label: 'Cyndi' },
-  { id: 'owie', label: 'Owie (Anjing)' },
+  { id: 'owie', label: 'Owie' },
 ];
 
 interface TranscriptEntry {

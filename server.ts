@@ -9,10 +9,18 @@ import {
   GoogleGenAI,
   Modality,
   ThinkingLevel,
-  type Content,
   type LiveServerMessage,
-  type Part,
 } from '@google/genai';
+import {
+  buildContents,
+  buildLivePersonaSessionConfig,
+  formatGeminiError,
+  getChatAttempts,
+  isRateLimitError,
+  isTransientError,
+  MODE_INSTRUCTIONS,
+  type IncomingMessage,
+} from './shared/sinarWarnaPrompt.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,158 +46,7 @@ function getGeminiClient(): GoogleGenAI {
   });
 }
 
-const SINAR_WARNA_STORE_KNOWLEDGE = [
-  'Bahasa utamamu adalah Bahasa Indonesia yang ramah, jelas, santun, dan membantu.',
-  'Kamu adalah asisten AI resmi Toko Sinar Warna.',
-  'Informasi cabang toko yang wajib kamu ingat: Toko Sinar Warna memiliki 2 cabang, yaitu Sinar Warna Dadap dan Sinar Warna Salembaran.',
-  'Jika pengguna menanyakan alamat, lokasi, letak, atau arah menuju toko Sinar Warna, beri tahu bahwa Sinar Warna memiliki 2 cabang yaitu Sinar Warna Dadap dan Sinar Warna Salembaran, dan arahkan pengguna untuk langsung mencarinya di Google Maps (cari "Sinar Warna Dadap" atau "Sinar Warna Salembaran" di Google Maps). Jangan mengarang alamat jalan spesifik.',
-  'Kamu juga ahli membantu konsultasi seputar cat (cat tembok interior/eksterior, cat kayu dan besi, cat anti bocor/waterproofing, cat dasar/primer, pemilihan kombinasi warna, takaran, daya sebar, dan teknik pengecatan) maupun pertanyaan lainnya.',
-].join(' ');
-
-const MODE_INSTRUCTIONS: Record<string, string> = {
-  general: [
-    SINAR_WARNA_STORE_KNOWLEDGE,
-    'Bantu pengguna dengan konsultasi cat, pemilihan warna, ide kreatif, maupun pertanyaan lainnya secara hangat, tajam, dan kolaboratif.',
-    'Selalu gunakan Bahasa Indonesia sebagai bahasa utama kecuali pengguna secara eksplisit meminta bahasa lain.',
-    'Gunakan pemformatan Markdown yang rapi (subjudul, poin bernomor, tebal untuk penekanan) agar mudah dipindai.',
-  ].join(' '),
-  design: [
-    SINAR_WARNA_STORE_KNOWLEDGE,
-    'Dalam mode Desain & Warna, bertindaklah sebagai Direktur Seni & Konsultan Warna Toko Sinar Warna.',
-    'Saat menyarankan warna, palet, atau warna cat ruangan, WAJIB sertakan kode warna HEX yang valid (contoh: #1E293B, #D97706) beserta peran tiap warna (dinding utama, aksen, plafon/trim) dan kesan psikologis/estetisnya.',
-    'Jika pengguna mengunggah gambar, analisis komposisi, pencahayaan, kontras, serta rekomendasi warna cat yang cocok.',
-    'Gunakan Bahasa Indonesia yang profesional namun mudah dipahami.',
-  ].join(' '),
-  copywriting: [
-    SINAR_WARNA_STORE_KNOWLEDGE,
-    'Dalam mode Penulisan & Naskah, bertindaklah sebagai Copywriter & Storyteller utama.',
-    'Berikan beberapa variasi sudut pandang atau nada tulisan beserta alasan singkat mengapa setiap variasi efektif.',
-    'Gunakan Bahasa Indonesia yang segar, berirama, dan bebas klise.',
-  ].join(' '),
-  campaign: [
-    SINAR_WARNA_STORE_KNOWLEDGE,
-    'Dalam mode Konsep & Kampanye, bertindaklah sebagai Creative Strategist.',
-    'Susun konsep kampanye secara terstruktur dalam Bahasa Indonesia yang strategis, jelas, dan aplikatif.',
-  ].join(' '),
-};
-
-interface IncomingAttachment {
-  mimeType: string;
-  data: string;
-}
-
-interface IncomingMessage {
-  role: 'user' | 'model';
-  text: string;
-  attachments?: IncomingAttachment[];
-}
-
-function buildContents(messages: IncomingMessage[]): Content[] {
-  return messages
-    .filter((msg) => msg.text.trim().length > 0 || (msg.attachments && msg.attachments.length > 0))
-    .map((msg) => {
-      const parts: Part[] = [];
-      if (msg.attachments && Array.isArray(msg.attachments)) {
-        for (const att of msg.attachments) {
-          if (att?.mimeType && att?.data) {
-            parts.push({
-              inlineData: {
-                mimeType: att.mimeType,
-                data: att.data,
-              },
-            });
-          }
-        }
-      }
-      if (msg.text && msg.text.trim().length > 0) {
-        parts.push({ text: msg.text });
-      }
-      return {
-        role: msg.role,
-        parts,
-      };
-    });
-}
-
-function formatGeminiError(err: unknown): { status: number; message: string } {
-  const errorObj = err as { status?: number; message?: string; code?: number };
-  const rawMessage = errorObj?.message || 'Terjadi kesalahan saat menghubungi layanan AI.';
-  const status = typeof errorObj?.status === 'number' ? errorObj.status : 500;
-
-  if (
-    rawMessage.includes('PERMISSION_DENIED') ||
-    rawMessage.includes('API_KEY_INVALID') ||
-    status === 403 ||
-    status === 400
-  ) {
-    if (rawMessage.includes('API_KEY') || status === 403) {
-      return {
-        status,
-        message:
-          'Akses API Gemini ditolak atau kunci API tidak valid. Silakan periksa kunci API Anda pada panel Settings > Secrets.',
-      };
-    }
-  }
-
-  if (rawMessage.includes('RESOURCE_EXHAUSTED') || status === 429) {
-    return {
-      status: 429,
-      message:
-        'Batas kuota permintaan AI sementara tercapai. Tunggu beberapa saat lalu coba kirim ulang.',
-    };
-  }
-
-  if (rawMessage.includes('NOT_FOUND') || status === 404) {
-    return {
-      status: 404,
-      message: 'Model AI yang diminta tidak ditemukan atau tidak tersedia.',
-    };
-  }
-
-  if (rawMessage.includes('UNAVAILABLE') || rawMessage.includes('high demand') || status === 503) {
-    return {
-      status: 503,
-      message:
-        'Layanan model AI sedang mengalami lonjakan trafik sementara. Tunggu beberapa detik lalu klik Coba Lagi.',
-    };
-  }
-
-  if (
-    (err as { name?: string })?.name === 'TimeoutError' ||
-    rawMessage.toLowerCase().includes('timeout')
-  ) {
-    return {
-      status: 504,
-      message: 'Waktu tunggu respons AI habis. Silakan klik Coba Lagi.',
-    };
-  }
-
-  return { status, message: rawMessage };
-}
-
-function isTransientError(err: unknown): boolean {
-  const errObj = err as { status?: number; message?: string; name?: string };
-  const status = errObj?.status;
-  const msg = errObj?.message || '';
-  return (
-    status === 503 ||
-    status === 500 ||
-    status === 429 ||
-    errObj?.name === 'TimeoutError' ||
-    errObj?.name === 'AbortError' ||
-    msg.includes('503') ||
-    msg.includes('UNAVAILABLE') ||
-    msg.includes('high demand') ||
-    msg.includes('RESOURCE_EXHAUSTED') ||
-    msg.toLowerCase().includes('timeout')
-  );
-}
-
-function isRateLimitError(err: unknown): boolean {
-  const errObj = err as { status?: number; message?: string };
-  const msg = errObj?.message || '';
-  return errObj?.status === 429 || msg.includes('RESOURCE_EXHAUSTED');
-}
+// Shared prompts, personas, and Gemini error/content helpers imported from ./shared/sinarWarnaPrompt.ts
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -267,19 +124,11 @@ async function createApp() {
       res.write(': connected\n\n');
 
       const primaryModel = 'gemini-4-hydrogen';
-      const fallbackModel = 'gemini-3.1-flash-lite';
       let activeIterator: AsyncIterator<Awaited<ReturnType<typeof ai.models.generateContentStream>> extends AsyncIterable<infer T> ? T : never> | null = null;
       let firstResult: IteratorResult<Awaited<ReturnType<typeof ai.models.generateContentStream>> extends AsyncIterable<infer T> ? T : never> | null = null;
       let lastErr: unknown;
 
-      const attempts: Array<{ model: string; level: ThinkingLevel; timeoutMs: number }> = [
-        { model: primaryModel, level: thinkingLevel, timeoutMs: 8500 },
-        {
-          model: fallbackModel,
-          level: thinkingDepth === 'deep' ? ThinkingLevel.HIGH : ThinkingLevel.MINIMAL,
-          timeoutMs: 25000,
-        },
-      ];
+      const attempts = getChatAttempts(thinkingDepth);
 
       for (const step of attempts) {
         if (abortController.signal.aborted) break;
@@ -425,40 +274,6 @@ async function createApp() {
   const server = http.createServer(app);
   const wss = new WebSocketServer({ noServer: true });
 
-  const VOICE_PERSONAS: Record<string, { voiceName: string; personaPrompt: string }> = {
-    santi: {
-      voiceName: 'Zephyr',
-      personaPrompt: 'Namamu adalah Santi, asisten AI Sinar Warna bersuara wanita yang hangat, ramah, dan inspiratif.',
-    },
-    cynthia: {
-      voiceName: 'Kore',
-      personaPrompt: 'Namamu adalah Cynthia, asisten AI Sinar Warna bersuara wanita yang tegas, elegan, dan profesional.',
-    },
-    awen: {
-      voiceName: 'Puck',
-      personaPrompt: 'Namamu adalah Awen, asisten AI Sinar Warna yang ceria, ekspresif, dan penuh semangat.',
-    },
-    cyndi: {
-      voiceName: 'Aoede',
-      personaPrompt: 'Namamu adalah Cyndi, asisten AI Sinar Warna bersuara wanita yang lembut, manis, dan cerdas.',
-    },
-    owie: {
-      voiceName: 'Charon',
-      personaPrompt:
-        'Namamu adalah Owie, seekor anjing pintar yang ceria, setia, dan menggemaskan di Sinar Warna. Selalu awali atau selingi percakapanmu dengan suara gonggongan anjing yang lucu seperti "Guk! Guk!" atau "Woof!" dengan nada anjing yang ramah, lalu jawab kebutuhan pengguna dengan jelas dalam Bahasa Indonesia.',
-    },
-    // Backwards-compatible aliases
-    Zephyr: { voiceName: 'Zephyr', personaPrompt: 'Namamu adalah Santi, asisten AI Sinar Warna.' },
-    Kore: { voiceName: 'Kore', personaPrompt: 'Namamu adalah Cynthia, asisten AI Sinar Warna.' },
-    Puck: { voiceName: 'Puck', personaPrompt: 'Namamu adalah Awen, asisten AI Sinar Warna.' },
-    Fenrir: { voiceName: 'Aoede', personaPrompt: 'Namamu adalah Cyndi, asisten AI Sinar Warna bersuara wanita.' },
-    Charon: {
-      voiceName: 'Charon',
-      personaPrompt:
-        'Namamu adalah Owie, seekor anjing pintar yang ceria di Sinar Warna. Selalu selingi suara gonggongan "Guk! Guk!" atau "Woof!" saat berbicara.',
-    },
-  };
-
   server.on('upgrade', (req, socket, head) => {
     const pathname = (req.url || '').split('?')[0];
     if (pathname === '/live') {
@@ -474,18 +289,11 @@ async function createApp() {
 
     const urlObj = new URL(req.url || '/live', 'http://localhost');
     const rawVoice = urlObj.searchParams.get('voice') || 'santi';
-    const persona = VOICE_PERSONAS[rawVoice] || VOICE_PERSONAS.santi;
-    const voiceName = persona.voiceName;
     const mode = urlObj.searchParams.get('mode') || 'general';
-    const modeContext = MODE_INSTRUCTIONS[mode] || MODE_INSTRUCTIONS.general;
-
-    const liveSystemInstruction = [
-      modeContext,
-      persona.personaPrompt,
-      'Ini adalah sesi percakapan suara & kamera langsung (Live) yang bersifat real-time.',
-      'Bahasa utamamu adalah Bahasa Indonesia. Berbicaralah secara alami, ringkas, ramah, dan langsung pada inti jawaban.',
-      'Jika kamera aktif dan kamu menerima frame gambar, jelaskan atau beri masukan seputar warna, cat, atau objek yang terlihat secara natural.',
-    ].join(' ');
+    const { voiceName, liveSystemInstruction, greetingPrompt } = buildLivePersonaSessionConfig(
+      rawVoice,
+      mode
+    );
 
     clientWs.on('close', () => {
       closedByClient = true;
@@ -592,11 +400,6 @@ async function createApp() {
         session.close();
         return;
       }
-
-      const greetingPrompt =
-        rawVoice === 'owie' || rawVoice === 'Charon'
-          ? 'Sesi Live baru saja dibuka. Segera sapa pengguna sekarang dalam Bahasa Indonesia dengan ceria (boleh selingi suara gonggongan lucu seperti "Guk!"), lalu ucapkan sapaan: "Hi apa kabar, ada yang mau di tanya seputar cat atau lainnya?"'
-          : 'Sesi Live baru saja dibuka. Segera sapa pengguna sekarang dalam Bahasa Indonesia dengan ramah dan natural menggunakan kalimat sapaan berikut: "Hi apa kabar, ada yang mau di tanya seputar cat atau lainnya?"';
 
       try {
         session.sendClientContent({
