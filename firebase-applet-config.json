@@ -1,0 +1,12 @@
+{
+  "projectId": "sinar-warna-ai",
+  "appId": "1:207131100614:web:6d5b369095b3367ba75ec7",
+  "apiKey": "AIzaSyDlQg7raXIKzz4-RIRbyzb8uK0VcxVv4nM",
+  "authDomain": "sinar-warna-ai.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-sinarwarna-dd26643e-bc06-45c9-a721-ba2bcbbf462b",
+  "storageBucket": "sinar-warna-ai.firebasestorage.app",
+  "messagingSenderId": "207131100614",
+  "measurementId": "",
+  "oAuthClientId": "207131100614-oehf05h62quq0lk63h016g9d6airhko9.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
+}

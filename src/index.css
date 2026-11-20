@@ -1,0 +1,108 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-display: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+  }
+}
+
+@keyframes sinar-float {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-6px) scale(1.02);
+  }
+}
+
+@keyframes sinar-speak {
+  0%, 100% {
+    transform: translateY(0px) scale(1) rotate(0deg);
+  }
+  20% {
+    transform: translateY(-8px) scale(1.08) rotate(-2deg);
+  }
+  45% {
+    transform: translateY(2px) scale(0.98) rotate(1.5deg);
+  }
+  70% {
+    transform: translateY(-10px) scale(1.1) rotate(2deg);
+  }
+}
+
+@keyframes sinar-ring {
+  0% {
+    transform: scale(0.88);
+    opacity: 0.72;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+
+.animate-sinar-float {
+  animation: sinar-float 3.8s ease-in-out infinite;
+}
+
+.animate-sinar-speak {
+  animation: sinar-speak 1.05s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite;
+}
+
+.animate-sinar-ring {
+  animation: sinar-ring 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.animate-sinar-ring-delayed {
+  animation: sinar-ring 1.6s cubic-bezier(0.16, 1, 0.3, 1) 0.8s infinite;
+}
+
+/* Subtle custom scrollbars matching Gemini-style workspace */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(113, 113, 122, 0.25);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(113, 113, 122, 0.45);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

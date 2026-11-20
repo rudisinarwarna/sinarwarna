@@ -1,0 +1,6 @@
+{
+  "name": "Sinar Warna",
+  "description": "Asisten AI kreatif interaktif bergaya Gemini untuk membantu penulisan, palet warna, konsep visual, dan ideasi secara real-time.",
+  "requestFramePermissions": ["microphone", "camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

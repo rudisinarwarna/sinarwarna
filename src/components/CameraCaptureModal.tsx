@@ -1,0 +1,191 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertCircle, Camera, SwitchCamera, X } from 'lucide-react';
+import type { ImageAttachment } from '../types/chat';
+
+interface CameraCaptureModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onCapture: (attachment: ImageAttachment) => void;
+}
+
+export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
+  isOpen,
+  onClose,
+  onCapture,
+}) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [error, setError] = useState<string | null>(null);
+  const [isReady, setIsReady] = useState(false);
+
+  const stopStream = useCallback(() => {
+    if (streamRef.current) {
+      for (const track of streamRef.current.getTracks()) {
+        track.stop();
+      }
+      streamRef.current = null;
+    }
+    setIsReady(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      stopStream();
+      return;
+    }
+
+    let cancelled = false;
+    setError(null);
+    setIsReady(false);
+
+    async function startCamera() {
+      stopStream();
+      try {
+        const media = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: facingMode },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+          audio: false,
+        });
+        if (cancelled) {
+          for (const t of media.getTracks()) t.stop();
+          return;
+        }
+        streamRef.current = media;
+        if (videoRef.current) {
+          videoRef.current.srcObject = media;
+          await videoRef.current.play();
+          setIsReady(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setError(
+            'Tidak dapat mengakses kamera. Pastikan izin kamera diaktifkan di peramban Anda.'
+          );
+        }
+      }
+    }
+
+    void startCamera();
+
+    return () => {
+      cancelled = true;
+      stopStream();
+    };
+  }, [facingMode, isOpen, stopStream]);
+
+  const handleTakePhoto = () => {
+    const video = videoRef.current;
+    if (!video || !isReady) return;
+
+    const width = video.videoWidth || 1280;
+    const height = video.videoHeight || 720;
+    const maxDim = 1280;
+    const scale = Math.min(1, maxDim / Math.max(width, height));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+    const base64Data = dataUrl.split(',')[1] || '';
+    if (!base64Data) return;
+
+    onCapture({
+      id: `cam-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: `kamera-${new Date().toISOString().slice(11, 19).replace(/:/g, '')}.jpg`,
+      mimeType: 'image/jpeg',
+      data: base64Data,
+      previewUrl: dataUrl,
+    });
+    stopStream();
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-black text-white overflow-hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Ambil foto dengan kamera"
+    >
+      {/* Full-screen Edge-to-Edge Viewfinder */}
+      <div className="relative flex-1 w-full h-full bg-black flex items-center justify-center overflow-hidden">
+        {error ? (
+          <div className="flex max-w-sm flex-col items-center gap-3 px-6 text-center text-sm text-red-200">
+            <AlertCircle className="h-9 w-9 text-red-400" />
+            <p>{error}</p>
+          </div>
+        ) : (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="h-full w-full object-cover"
+          />
+        )}
+
+        {/* Floating Top Overlay Controls */}
+        <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-black/75 via-black/35 to-transparent px-4 py-4 sm:px-6">
+          <div className="flex items-center gap-2.5">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-[#E51D2B] to-[#0A36FF] text-white shadow-md">
+              <Camera className="h-4 w-4" />
+            </span>
+            <span className="font-display text-sm font-semibold tracking-tight text-white">
+              Kamera Sinar Warna
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() =>
+                setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
+              }
+              title="Ganti kamera depan/belakang"
+              aria-label="Ganti kamera depan/belakang"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-md hover:bg-black/75 transition-colors cursor-pointer"
+            >
+              <SwitchCamera className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                stopStream();
+                onClose();
+              }}
+              title="Tutup kamera"
+              aria-label="Tutup kamera"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-md hover:bg-[#E51D2B] transition-colors cursor-pointer"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Floating Bottom Shutter Bar */}
+        <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-center bg-gradient-to-t from-black/80 via-black/35 to-transparent px-5 pb-8 pt-8">
+          <button
+            type="button"
+            disabled={!isReady || Boolean(error)}
+            onClick={handleTakePhoto}
+            className="inline-flex h-14 items-center gap-2.5 rounded-full bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] px-7 text-sm font-semibold text-white shadow-xl shadow-blue-600/35 hover:opacity-95 disabled:opacity-40 transition-all cursor-pointer"
+          >
+            <Camera className="h-5 w-5" />
+            <span>Ambil Foto</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};

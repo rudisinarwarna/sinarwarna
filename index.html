@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/assets/sinar-warna-logo.png" />
+    <title>Sinar Warna — Asisten AI Kreatif Interaktif</title>
+    <meta
+      name="description"
+      content="Asisten AI kreatif interaktif bergaya Gemini untuk membantu penulisan, palet warna, konsep visual, dan ideasi secara real-time."
+    />
+    <meta property="og:title" content="Sinar Warna — Asisten AI Kreatif Interaktif" />
+    <meta
+      property="og:description"
+      content="Asisten AI kreatif interaktif bergaya Gemini untuk membantu penulisan, palet warna, konsep visual, dan ideasi secara real-time."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400..700&family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('sinar-warna-theme');
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (stored === 'dark' || (!stored && prefersDark)) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body class="bg-white dark:bg-[#0B0F1A] text-zinc-900 dark:text-[#E3E3E3] antialiased selection:bg-blue-600/20 selection:text-blue-700 dark:selection:bg-blue-400/25 dark:selection:text-blue-200">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
