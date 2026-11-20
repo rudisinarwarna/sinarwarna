@@ -14,12 +14,19 @@ import {
 } from 'lucide-react';
 import { AuthScreen } from './components/AuthScreen';
 import { CameraCaptureModal } from './components/CameraCaptureModal';
+import {
+  InstallAppPrompt,
+  isInstallPromptDismissed,
+  markInstallPromptDismissed,
+} from './components/InstallAppPrompt';
 import { LiveStudioModal } from './components/LiveStudioModal';
 import { MessageBubble } from './components/MessageBubble';
 import { PromptComposer } from './components/PromptComposer';
+import { SettingsModal } from './components/SettingsModal';
 import { Sidebar } from './components/Sidebar';
 import { SinarLogo } from './components/SinarLogo';
 import { WelcomeCanvas } from './components/WelcomeCanvas';
+import { usePWAInstall } from './hooks/usePWAInstall';
 import { buildApiUrl } from './config/api';
 import {
   auth,
@@ -132,9 +139,15 @@ export default function App() {
   const [cameraModalOpen, setCameraModalOpen] = useState<boolean>(false);
   const [liveModalOpen, setLiveModalOpen] = useState<boolean>(false);
   const [liveInitialCameraOn, setLiveInitialCameraOn] = useState<boolean>(false);
+  const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
+  const [showInstallBanner, setShowInstallBanner] = useState<boolean>(
+    () => !isInstallPromptDismissed()
+  );
   const [pendingCameraAttachment, setPendingCameraAttachment] = useState<ImageAttachment | null>(
     null
   );
+
+  const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -933,7 +946,6 @@ export default function App() {
       <Sidebar
         isDesktopOpen={sidebarDesktopOpen}
         isMobileOpen={sidebarMobileOpen}
-        isDark={isDark}
         user={user}
         isCloudUser={isCloudUser}
         authReady={authReady}
@@ -947,7 +959,7 @@ export default function App() {
         onDeleteConversation={(id) => {
           void handleDeleteConversation(id);
         }}
-        onToggleTheme={() => setIsDark((prev) => !prev)}
+        onOpenSettings={() => setSettingsModalOpen(true)}
         onSignIn={() => setAuthModalOpen(true)}
         onSignOut={() => {
           void handleSignOut();
@@ -1156,6 +1168,31 @@ export default function App() {
           void handleLiveClose(transcriptLog);
         }}
       />
+
+      <SettingsModal
+        isOpen={settingsModalOpen}
+        isDark={isDark}
+        isInstallable={isInstallable}
+        isInstalled={isInstalled}
+        isIOS={isIOS}
+        onClose={() => setSettingsModalOpen(false)}
+        onSetTheme={(dark) => setIsDark(dark)}
+        onInstallAndroid={install}
+      />
+
+      {showInstallBanner && !isInstalled && !settingsModalOpen && !liveModalOpen && !authModalOpen && (
+        <InstallAppPrompt
+          isInstallable={isInstallable}
+          isInstalled={isInstalled}
+          isIOS={isIOS}
+          onInstall={install}
+          onOpenSettings={() => setSettingsModalOpen(true)}
+          onDismiss={() => {
+            markInstallPromptDismissed();
+            setShowInstallBanner(false);
+          }}
+        />
+      )}
 
       {authModalOpen && !user && (
         <AuthScreen

@@ -4,11 +4,10 @@ import {
   LogIn,
   LogOut,
   MessageSquare,
-  Moon,
   PanelLeftClose,
   Plus,
   Search,
-  Sun,
+  Settings,
   Trash2,
   X,
 } from 'lucide-react';
@@ -18,7 +17,6 @@ import { SinarLogo } from './SinarLogo';
 interface SidebarProps {
   isDesktopOpen: boolean;
   isMobileOpen: boolean;
-  isDark: boolean;
   user: User | null;
   isCloudUser?: boolean;
   authReady: boolean;
@@ -30,7 +28,7 @@ interface SidebarProps {
   onNewChat: () => void;
   onSelectConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
-  onToggleTheme: () => void;
+  onOpenSettings: () => void;
   onSignIn: () => void;
   onSignOut: () => void;
 }
@@ -38,7 +36,6 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({
   isDesktopOpen,
   isMobileOpen,
-  isDark,
   user,
   isCloudUser,
   authReady,
@@ -50,7 +47,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onNewChat,
   onSelectConversation,
   onDeleteConversation,
-  onToggleTheme,
+  onOpenSettings,
   onSignIn,
   onSignOut,
 }) => {
@@ -198,16 +195,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* Bottom Theme & Firebase Account */}
+      {/* Bottom Settings & Firebase Account */}
       <div className="border-t border-zinc-200/80 dark:border-[#242C44] p-3 space-y-1.5">
         <button
           type="button"
-          onClick={onToggleTheme}
+          onClick={() => {
+            onOpenSettings();
+            onCloseMobile();
+          }}
           className="flex min-h-[44px] w-full items-center justify-between rounded-xl px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-200/60 dark:text-zinc-300 dark:hover:bg-white/5 transition-colors cursor-pointer"
         >
           <span className="flex items-center gap-2.5">
-            {isDark ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-blue-600" />}
-            <span>{isDark ? 'Tema Terang' : 'Tema Gelap'}</span>
+            <Settings className="h-4 w-4 text-[#0A36FF] dark:text-blue-400" />
+            <span>Pengaturan</span>
           </span>
         </button>
 
