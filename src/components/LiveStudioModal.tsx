@@ -12,6 +12,7 @@ import {
   Volume2,
 } from 'lucide-react';
 import type { CreativeModeId } from '../types/chat';
+import { buildLiveWsUrl } from '../config/api';
 import { SinarLogo } from './SinarLogo';
 
 interface LiveStudioModalProps {
@@ -296,10 +297,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         inputAudioCtxRef.current = inputCtx;
         outputAudioCtxRef.current = outputCtx;
 
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/live?voice=${encodeURIComponent(
-          voice
-        )}&mode=${encodeURIComponent(activeMode)}`;
+        const wsUrl = buildLiveWsUrl(voice, activeMode);
 
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;

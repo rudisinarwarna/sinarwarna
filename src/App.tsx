@@ -18,6 +18,7 @@ import { PromptComposer } from './components/PromptComposer';
 import { Sidebar } from './components/Sidebar';
 import { SinarLogo } from './components/SinarLogo';
 import { WelcomeCanvas } from './components/WelcomeCanvas';
+import { buildApiUrl } from './config/api';
 import { auth, signOutUser } from './firebase';
 import {
   createConversationDoc,
@@ -325,7 +326,7 @@ export default function App() {
   const fetchAutoTitle = useCallback(
     async (convId: string, firstPrompt: string, currentUser: User | null) => {
       try {
-        const response = await fetch('/api/title', {
+        const response = await fetch(buildApiUrl('/api/title'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ prompt: firstPrompt }),
@@ -365,7 +366,7 @@ export default function App() {
       let streamError: string | undefined;
 
       try {
-        const response = await fetch('/api/chat/stream', {
+        const response = await fetch(buildApiUrl('/api/chat/stream'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
