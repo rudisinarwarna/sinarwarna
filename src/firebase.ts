@@ -20,8 +20,13 @@ const RECAPTCHA_SITE_KEY =
 
 const app = initializeApp({
   ...firebaseConfig,
-  appId: '1:207131100614:web:efb2a27af3835809a75ec7',
-  measurementId: 'G-924Q8Z7J17',
+  apiKey: 'AIzaSyDlQg7raXIKzz4-RIRbyzb8uK0VcxVv4nM',
+  authDomain: 'sinar-warna-ai.firebaseapp.com',
+  projectId: 'sinar-warna-ai',
+  storageBucket: 'sinar-warna-ai.firebasestorage.app',
+  messagingSenderId: '207131100614',
+  appId: '1:207131100614:web:486897c38eb0cb4ba75ec7',
+  measurementId: 'G-KW5VVLQVSD',
 });
 
 export let appCheck: AppCheck | null = null;
