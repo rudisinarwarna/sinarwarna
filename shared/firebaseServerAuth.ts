@@ -24,11 +24,15 @@ export interface AdminMemoryRecord {
   content: string;
 }
 
+export type AdminLevel = 'none' | 'admin' | 'admin_plus' | 'primary';
+
 export interface ServerAuthContext {
   authenticated: boolean;
   uid: string | null;
   email: string | null;
   isAdmin: boolean;
+  adminLevel: AdminLevel;
+  canAccessAdminMemories: boolean;
   isPrimaryAdmin: boolean;
   isBlocked: boolean;
   adminMemories: AdminMemoryRecord[];
@@ -193,6 +197,21 @@ export async function fetchAdminMemoriesServer(idToken: string): Promise<AdminMe
     .filter((m) => m.id && m.content);
 }
 
+export async function fetchLiveOpeningGreetingServer(): Promise<string> {
+  try {
+    const url = `${firestoreDocsBaseUrl()}/appConfig/live`;
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!res.ok) return '';
+    const doc = (await res.json().catch(() => null)) as FirestoreRestDoc | null;
+    const text = doc?.fields?.greetingText?.stringValue || '';
+    return text.trim().slice(0, 500);
+  } catch {
+    return '';
+  }
+}
+
 export async function resolveServerAuthContext(
   idToken: string | null | undefined
 ): Promise<ServerAuthContext> {
@@ -201,6 +220,8 @@ export async function resolveServerAuthContext(
     uid: null,
     email: null,
     isAdmin: false,
+    adminLevel: 'none',
+    canAccessAdminMemories: false,
     isPrimaryAdmin: false,
     isBlocked: false,
     adminMemories: [],
@@ -216,7 +237,7 @@ export async function resolveServerAuthContext(
     claims.emailVerified && claims.email === PRIMARY_ADMIN_EMAIL.toLowerCase();
 
   let isBlocked = false;
-  let hasAdminGrant = false;
+  let adminLevel: AdminLevel = 'none';
 
   if (claims.emailVerified) {
     const base = firestoreDocsBaseUrl();
@@ -229,28 +250,43 @@ export async function resolveServerAuthContext(
         : fetch(`${base}/admins/${encodeURIComponent(claims.uid)}`, { headers }).catch(() => null),
     ]);
 
+    let userRoleField = 'user';
     if (userRes && userRes.ok) {
       const userDoc = (await userRes.json().catch(() => null)) as FirestoreRestDoc | null;
       const blockedVal = userDoc?.fields?.blocked?.booleanValue === true;
       const deletedVal = userDoc?.fields?.deleted?.booleanValue === true;
+      userRoleField = userDoc?.fields?.role?.stringValue || 'user';
       if (blockedVal || deletedVal) {
         isBlocked = true;
       }
     }
 
     if (isPrimaryAdmin) {
-      hasAdminGrant = true;
-    } else if (adminRes && adminRes.ok) {
-      hasAdminGrant = true;
+      adminLevel = 'primary';
+    } else if (!isBlocked && adminRes && adminRes.ok) {
+      const adminDoc = (await adminRes.json().catch(() => null)) as FirestoreRestDoc | null;
+      const grantLevel = adminDoc?.fields?.level?.stringValue || '';
+      if (grantLevel === 'admin_plus' || userRoleField === 'admin_plus') {
+        adminLevel = 'admin_plus';
+      } else {
+        adminLevel = 'admin';
+      }
     }
   }
 
-  const isAdmin = Boolean(claims.emailVerified && hasAdminGrant && !isBlocked);
+  if (isBlocked) {
+    adminLevel = 'none';
+  }
+
+  const isAdmin = Boolean(claims.emailVerified && adminLevel !== 'none' && !isBlocked);
+  const canAccessAdminMemories = Boolean(
+    isAdmin && (adminLevel === 'primary' || adminLevel === 'admin_plus')
+  );
 
   let adminMemories: AdminMemoryRecord[] = [];
   let seedMetaExists = false;
 
-  if (isAdmin) {
+  if (canAccessAdminMemories) {
     const base = firestoreDocsBaseUrl();
     const headers = { Authorization: `Bearer ${idToken}` };
     const [memories, seedRes] = await Promise.all([
@@ -266,6 +302,8 @@ export async function resolveServerAuthContext(
     uid: claims.uid,
     email: claims.email,
     isAdmin,
+    adminLevel,
+    canAccessAdminMemories,
     isPrimaryAdmin,
     isBlocked,
     adminMemories,

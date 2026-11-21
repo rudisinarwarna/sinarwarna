@@ -6,37 +6,61 @@ import {
   Ban,
   BookOpen,
   CheckCircle2,
+  Crown,
+  Mic,
   Plus,
+  RotateCcw,
+  Save,
   Search,
   Shield,
   ShieldAlert,
   ShieldOff,
+  Sparkles,
   Trash2,
   UserCheck,
   Users,
 } from 'lucide-react';
 import {
   addAdminMemory,
+  canManageUserRecord,
   deleteAdminMemory,
   deleteUserAccount,
+  saveLiveOpeningGreeting,
   seedDefaultAdminMemoriesOnce,
-  setUserAdminRole,
   setUserBlocked,
+  setUserRoleLevel,
   setUserVerifiedBadge,
   subscribeAdminMemories,
   subscribeAllUsers,
+  subscribeLiveOpeningGreeting,
+  type AdminLevel,
   type AdminMemoryDoc,
   type ManagedUserRecord,
+  type UserRole,
 } from '../services/adminService';
 import { VerifiedBlueBadge } from './VerifiedBlueBadge';
 
 interface AdminPanelProps {
   currentUser: User | null;
+  adminLevel?: AdminLevel;
   compact?: boolean;
 }
 
-export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = false }) => {
-  const [subTab, setSubTab] = useState<'users' | 'memories'>('users');
+function getLevelLabel(level: AdminLevel): string {
+  if (level === 'primary') return 'Admin Utama';
+  if (level === 'admin_plus') return 'Admin+';
+  if (level === 'admin') return 'Admin';
+  return 'User';
+}
+
+export const AdminPanel: React.FC<AdminPanelProps> = ({
+  currentUser,
+  adminLevel = 'admin',
+  compact = false,
+}) => {
+  const canAccessMemories = adminLevel === 'primary' || adminLevel === 'admin_plus';
+
+  const [subTab, setSubTab] = useState<'users' | 'liveGreeting' | 'memories'>('users');
   const [users, setUsers] = useState<ManagedUserRecord[]>([]);
   const [memories, setMemories] = useState<AdminMemoryDoc[]>([]);
   const [userSearch, setUserSearch] = useState('');
@@ -49,29 +73,55 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
   const [newContent, setNewContent] = useState('');
   const [savingMemory, setSavingMemory] = useState(false);
 
+  const [savedLiveGreeting, setSavedLiveGreeting] = useState('');
+  const [liveGreetingInput, setLiveGreetingInput] = useState('');
+  const [savingLiveGreeting, setSavingLiveGreeting] = useState(false);
+
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!canAccessMemories && subTab !== 'users') {
+      setSubTab('users');
+    }
+  }, [canAccessMemories, subTab]);
 
-    void seedDefaultAdminMemoriesOnce(currentUser).catch((err) => {
-      console.error('Seed admin memories skipped/error:', err);
-    });
+  useEffect(() => {
+    if (!currentUser) return;
 
     const unsubUsers = subscribeAllUsers(
       (list) => setUsers(list),
       (err) => setFeedback({ type: 'err', text: err.message })
     );
-    const unsubMemories = subscribeAdminMemories(
-      (list) => setMemories(list),
-      (err) => setFeedback({ type: 'err', text: err.message })
-    );
+
+    let unsubMemories: (() => void) | undefined;
+    let unsubLiveGreeting: (() => void) | undefined;
+    if (canAccessMemories) {
+      void seedDefaultAdminMemoriesOnce(currentUser).catch((err) => {
+        console.error('Seed admin memories skipped/error:', err);
+      });
+      unsubMemories = subscribeAdminMemories(
+        (list) => setMemories(list),
+        (err) => setFeedback({ type: 'err', text: err.message })
+      );
+      unsubLiveGreeting = subscribeLiveOpeningGreeting(
+        (text) => {
+          setSavedLiveGreeting(text);
+          setLiveGreetingInput(text);
+        },
+        (err) => setFeedback({ type: 'err', text: err.message })
+      );
+    } else {
+      setMemories([]);
+      setSavedLiveGreeting('');
+      setLiveGreetingInput('');
+    }
 
     return () => {
       unsubUsers();
-      unsubMemories();
+      unsubMemories?.();
+      unsubLiveGreeting?.();
     };
-  }, [currentUser]);
+  }, [canAccessMemories, currentUser]);
 
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
@@ -84,23 +134,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
     );
   }, [userSearch, users]);
 
-  const handleToggleAdmin = async (target: ManagedUserRecord) => {
+  const handleSetRole = async (target: ManagedUserRecord, nextRole: UserRole) => {
     if (!currentUser || busyUid) return;
     setBusyUid(target.uid);
     setFeedback(null);
     try {
-      const makeAdmin = target.role !== 'admin';
-      await setUserAdminRole(currentUser, target, makeAdmin);
+      await setUserRoleLevel(currentUser, adminLevel, target, nextRole);
+      const roleName =
+        nextRole === 'admin_plus' ? 'Admin+' : nextRole === 'admin' ? 'Admin' : 'User';
       setFeedback({
         type: 'ok',
-        text: makeAdmin
-          ? `${target.displayName} sekarang menjadi Admin (dengan centang biru verified).`
-          : `Hak Admin untuk ${target.displayName} telah dicabut.`,
+        text:
+          nextRole === 'user'
+            ? `${target.displayName} diubah menjadi User biasa.`
+            : `${target.displayName} sekarang menjadi ${roleName} (otomatis centang biru verified).`,
       });
     } catch (err) {
       setFeedback({
         type: 'err',
-        text: err instanceof Error ? err.message : 'Gagal mengubah peran pengguna.',
+        text: err instanceof Error ? err.message : 'Gagal mengubah level pengguna.',
       });
     } finally {
       setBusyUid(null);
@@ -108,12 +160,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
   };
 
   const handleToggleVerifiedBadge = async (target: ManagedUserRecord) => {
-    if (busyUid) return;
+    if (!currentUser || busyUid) return;
     setBusyUid(target.uid);
     setFeedback(null);
     try {
       const nextVerified = !target.verifiedBadge;
-      await setUserVerifiedBadge(target, nextVerified);
+      await setUserVerifiedBadge(adminLevel, currentUser.uid, target, nextVerified);
       setFeedback({
         type: 'ok',
         text: nextVerified
@@ -131,12 +183,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
   };
 
   const handleToggleBlock = async (target: ManagedUserRecord) => {
-    if (busyUid) return;
+    if (!currentUser || busyUid) return;
     setBusyUid(target.uid);
     setFeedback(null);
     try {
       const nextBlocked = !target.blocked;
-      await setUserBlocked(target, nextBlocked);
+      await setUserBlocked(adminLevel, currentUser.uid, target, nextBlocked);
       setFeedback({
         type: 'ok',
         text: nextBlocked
@@ -154,11 +206,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
   };
 
   const handleDeleteUser = async (target: ManagedUserRecord) => {
-    if (busyUid) return;
+    if (!currentUser || busyUid) return;
     setBusyUid(target.uid);
     setFeedback(null);
     try {
-      await deleteUserAccount(target);
+      await deleteUserAccount(adminLevel, currentUser.uid, target);
       setConfirmDeleteUid(null);
       setFeedback({
         type: 'ok',
@@ -176,7 +228,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
 
   const handleAddMemory = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser || savingMemory) return;
+    if (!currentUser || !canAccessMemories || savingMemory) return;
     if (!newContent.trim()) {
       setFeedback({ type: 'err', text: 'Isi pengingat tidak boleh kosong.' });
       return;
@@ -193,7 +245,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
       setNewContent('');
       setFeedback({
         type: 'ok',
-        text: 'Pengingat pribadi disimpan dan langsung disinkronkan ke semua Admin.',
+        text: 'Pengingat pribadi disimpan dan disinkronkan ke Admin+ & Admin Utama.',
       });
     } catch (err) {
       setFeedback({
@@ -206,7 +258,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
   };
 
   const handleDeleteMemory = async (mem: AdminMemoryDoc) => {
-    if (busyMemoryId) return;
+    if (!canAccessMemories || busyMemoryId) return;
     setBusyMemoryId(mem.id);
     setFeedback(null);
     try {
@@ -214,7 +266,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
       setConfirmDeleteMemId(null);
       setFeedback({
         type: 'ok',
-        text: `Pengingat "${mem.title}" telah dihapus dari semua Admin.`,
+        text: `Pengingat "${mem.title}" telah dihapus.`,
       });
     } catch (err) {
       setFeedback({
@@ -226,35 +278,116 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
     }
   };
 
+  const handleSaveLiveGreeting = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser || !canAccessMemories || savingLiveGreeting) return;
+    setSavingLiveGreeting(true);
+    setFeedback(null);
+    const nextText = liveGreetingInput.trim().slice(0, 500);
+    try {
+      await saveLiveOpeningGreeting(currentUser, nextText);
+      setFeedback({
+        type: 'ok',
+        text: nextText
+          ? 'Kata pembuka AI Live disimpan. Saat AI Live dinyalakan, AI akan langsung mengucapkan kalimat ini.'
+          : 'Kata pembuka AI Live dikembalikan ke sapaan bawaan.',
+      });
+    } catch (err) {
+      setFeedback({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Gagal menyimpan kata pembuka AI Live.',
+      });
+    } finally {
+      setSavingLiveGreeting(false);
+    }
+  };
+
+  const handleResetLiveGreeting = async () => {
+    if (!currentUser || !canAccessMemories || savingLiveGreeting) return;
+    setSavingLiveGreeting(true);
+    setFeedback(null);
+    try {
+      await saveLiveOpeningGreeting(currentUser, '');
+      setLiveGreetingInput('');
+      setFeedback({
+        type: 'ok',
+        text: 'Kata pembuka AI Live dikembalikan ke sapaan bawaan.',
+      });
+    } catch (err) {
+      setFeedback({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Gagal mereset kata pembuka AI Live.',
+      });
+    } finally {
+      setSavingLiveGreeting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
-      {/* Sub-navigation */}
-      <div className="grid grid-cols-2 gap-2 rounded-2xl bg-zinc-100 p-1.5 dark:bg-[#0B0F1A]">
-        <button
-          type="button"
-          onClick={() => setSubTab('users')}
-          className={`flex min-h-[40px] items-center justify-center gap-2 rounded-xl px-3 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-            subTab === 'users'
-              ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
-              : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
-          }`}
-        >
-          <Users className="h-3.5 w-3.5 text-[#0A36FF] dark:text-blue-400" />
-          <span>Pengguna ({filteredUsers.length})</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setSubTab('memories')}
-          className={`flex min-h-[40px] items-center justify-center gap-2 rounded-xl px-3 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-            subTab === 'memories'
-              ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
-              : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
-          }`}
-        >
-          <BookOpen className="h-3.5 w-3.5 text-[#E51D2B] dark:text-[#FF4D5A]" />
-          <span>Pengingat Pribadi ({memories.length})</span>
-        </button>
+      {/* Level Status Banner */}
+      <div className="flex items-center justify-between gap-2 rounded-xl border border-blue-500/20 bg-blue-50/70 dark:bg-blue-950/25 px-3 py-2 text-[11px]">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="inline-flex items-center gap-1 rounded-md bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] px-2 py-0.5 text-[10px] font-bold text-white shrink-0">
+            {getLevelLabel(adminLevel)}
+          </span>
+          <VerifiedBlueBadge size="xs" title="Admin Terverifikasi" />
+          <span className="truncate text-zinc-600 dark:text-zinc-300">
+            {adminLevel === 'primary' &&
+              'Akses penuh: semua level admin, kata pembuka Live, & pengingat pribadi.'}
+            {adminLevel === 'admin_plus' &&
+              'Kelola User, Admin biasa, kata pembuka Live, & pengingat pribadi.'}
+            {adminLevel === 'admin' && 'Kelola akun User biasa (tidak bisa ubah sesama Admin).'}
+          </span>
+        </div>
       </div>
+
+      {/* Sub-navigation: Sapaan Live & Pengingat Pribadi ONLY visible for Admin+ and Admin Utama */}
+      {canAccessMemories ? (
+        <div className="grid grid-cols-3 gap-1.5 rounded-2xl bg-zinc-100 p-1.5 dark:bg-[#0B0F1A]">
+          <button
+            type="button"
+            onClick={() => setSubTab('users')}
+            className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+              subTab === 'users'
+                ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
+                : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+            }`}
+          >
+            <Users className="h-3.5 w-3.5 text-[#0A36FF] dark:text-blue-400 shrink-0" />
+            <span>Pengguna ({filteredUsers.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSubTab('liveGreeting')}
+            className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+              subTab === 'liveGreeting'
+                ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
+                : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+            }`}
+          >
+            <Mic className="h-3.5 w-3.5 text-[#0A36FF] dark:text-blue-400 shrink-0" />
+            <span>Sapaan Live</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSubTab('memories')}
+            className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+              subTab === 'memories'
+                ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
+                : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+            }`}
+          >
+            <BookOpen className="h-3.5 w-3.5 text-[#E51D2B] dark:text-[#FF4D5A] shrink-0" />
+            <span>Pengingat ({memories.length})</span>
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 rounded-2xl bg-zinc-100 px-3.5 py-2.5 text-xs font-semibold text-zinc-900 dark:bg-[#0B0F1A] dark:text-white">
+          <Users className="h-3.5 w-3.5 text-[#0A36FF] dark:text-blue-400" />
+          <span>Daftar Pengguna ({filteredUsers.length})</span>
+        </div>
+      )}
 
       {feedback && (
         <div
@@ -273,7 +406,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
         </div>
       )}
 
-      {subTab === 'users' ? (
+      {subTab === 'users' || !canAccessMemories ? (
         <div className="space-y-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400" />
@@ -296,6 +429,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
                 const isSelf = currentUser?.uid === u.uid;
                 const isBusy = busyUid === u.uid;
                 const isConfirmingDelete = confirmDeleteUid === u.uid;
+                const canManage = canManageUserRecord(adminLevel, currentUser?.uid || '', u);
 
                 return (
                   <div
@@ -321,12 +455,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
                             <p className="truncate text-xs font-semibold text-zinc-900 dark:text-white">
                               {u.displayName}
                             </p>
-                            {(u.verifiedBadge || u.role === 'admin' || u.isPrimaryAdmin) && (
+                            {(u.verifiedBadge || u.role !== 'user' || u.isPrimaryAdmin) && (
                               <VerifiedBlueBadge
                                 size="sm"
                                 title={
                                   u.isPrimaryAdmin
                                     ? 'Admin Utama Terverifikasi'
+                                    : u.role === 'admin_plus'
+                                    ? 'Admin+ Terverifikasi'
                                     : u.role === 'admin'
                                     ? 'Admin Terverifikasi'
                                     : 'Pengguna Terverifikasi'
@@ -335,8 +471,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
                             )}
                             {u.isPrimaryAdmin ? (
                               <span className="inline-flex items-center gap-1 rounded-md bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] px-1.5 py-0.5 text-[10px] font-bold text-white">
-                                <Shield className="h-2.5 w-2.5" />
+                                <Crown className="h-2.5 w-2.5" />
                                 Admin Utama
+                              </span>
+                            ) : u.role === 'admin_plus' ? (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-indigo-600/15 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-500/25 dark:text-indigo-300">
+                                <Sparkles className="h-2.5 w-2.5" />
+                                Admin+
                               </span>
                             ) : u.role === 'admin' ? (
                               <span className="inline-flex items-center gap-1 rounded-md bg-blue-600/15 px-1.5 py-0.5 text-[10px] font-semibold text-[#0A36FF] dark:bg-blue-500/20 dark:text-blue-300">
@@ -364,35 +505,62 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
 
                     {u.isPrimaryAdmin ? (
                       <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                        Akun Admin Utama permanen dengan centang biru verified (dilindungi dari blokir atau penghapusan).
+                        Akun Admin Utama permanen dengan centang biru verified (dilindungi dari perubahan, blokir, atau penghapusan).
+                      </p>
+                    ) : isSelf ? (
+                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                        Akun Anda sendiri yang sedang login.
+                      </p>
+                    ) : !canManage ? (
+                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {u.role === 'admin_plus'
+                          ? 'Akun Admin+ hanya dapat diubah oleh Admin Utama.'
+                          : 'Admin biasa tidak dapat mengubah sesama Admin. Hanya Admin+ atau Admin Utama yang dapat mengubah Admin.'}
                       </p>
                     ) : (
                       <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                        <button
-                          type="button"
-                          disabled={isBusy || isSelf}
-                          onClick={() => void handleToggleAdmin(u)}
-                          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-blue-500/30 bg-white dark:bg-[#14192B] px-2.5 text-[11px] font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/50 disabled:opacity-50 cursor-pointer"
-                        >
-                          {u.role === 'admin' ? (
-                            <>
-                              <ShieldOff className="h-3 w-3" />
-                              <span>Cabut Admin</span>
-                            </>
-                          ) : (
-                            <>
-                              <UserCheck className="h-3 w-3" />
-                              <span>Jadikan Admin</span>
-                            </>
-                          )}
-                        </button>
+                        {u.role !== 'user' && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => void handleSetRole(u, 'user')}
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-[#2E3858] bg-white dark:bg-[#14192B] px-2.5 text-[11px] font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-[#1C233B] disabled:opacity-50 cursor-pointer"
+                          >
+                            <ShieldOff className="h-3 w-3" />
+                            <span>Ubah ke User</span>
+                          </button>
+                        )}
+
+                        {u.role !== 'admin' && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => void handleSetRole(u, 'admin')}
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-blue-500/30 bg-white dark:bg-[#14192B] px-2.5 text-[11px] font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/50 disabled:opacity-50 cursor-pointer"
+                          >
+                            <UserCheck className="h-3 w-3" />
+                            <span>Jadikan Admin</span>
+                          </button>
+                        )}
+
+                        {adminLevel === 'primary' && u.role !== 'admin_plus' && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => void handleSetRole(u, 'admin_plus')}
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-indigo-500/35 bg-indigo-50/80 dark:bg-indigo-950/40 px-2.5 text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 disabled:opacity-50 cursor-pointer"
+                          >
+                            <Sparkles className="h-3 w-3" />
+                            <span>Jadikan Admin+</span>
+                          </button>
+                        )}
 
                         <button
                           type="button"
-                          disabled={isBusy || isSelf || u.role === 'admin'}
+                          disabled={isBusy || u.role !== 'user'}
                           title={
-                            u.role === 'admin'
-                              ? 'Admin otomatis memiliki centang biru verified'
+                            u.role !== 'user'
+                              ? 'Semua Admin otomatis memiliki centang biru verified'
                               : undefined
                           }
                           onClick={() => void handleToggleVerifiedBadge(u)}
@@ -408,7 +576,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
 
                         <button
                           type="button"
-                          disabled={isBusy || isSelf}
+                          disabled={isBusy}
                           onClick={() => void handleToggleBlock(u)}
                           className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-medium disabled:opacity-50 cursor-pointer ${
                             u.blocked
@@ -442,7 +610,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
                         ) : (
                           <button
                             type="button"
-                            disabled={isBusy || isSelf}
+                            disabled={isBusy}
                             onClick={() => setConfirmDeleteUid(u.uid)}
                             className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-500/30 bg-white dark:bg-[#14192B] px-2.5 text-[11px] font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-50 cursor-pointer"
                           >
@@ -458,12 +626,88 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
             )}
           </div>
         </div>
+      ) : subTab === 'liveGreeting' ? (
+        <div className="space-y-3">
+          <div className="rounded-xl border border-blue-500/20 bg-blue-50/70 dark:bg-blue-950/25 px-3 py-2.5 text-[11px] leading-relaxed text-zinc-700 dark:text-zinc-300 space-y-1">
+            <p>
+              <strong>Kata Pembuka AI Live (Khusus Admin+ &amp; Admin Utama):</strong> Ketik kalimat
+              pertama yang akan langsung diucapkan AI setiap kali mode <strong>AI Live</strong>{' '}
+              dihidupkan.
+            </p>
+            <p className="text-zinc-500 dark:text-zinc-400">
+              Kosongkan lalu simpan jika ingin memakai sapaan bawaan.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-zinc-200/80 dark:border-[#242C44] bg-white dark:bg-[#111626] px-3 py-2.5 text-xs space-y-1">
+            <p className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
+              Status Sapaan Awal Saat Ini:
+            </p>
+            {savedLiveGreeting ? (
+              <p className="font-medium text-zinc-900 dark:text-white">
+                &ldquo;{savedLiveGreeting}&rdquo;
+              </p>
+            ) : (
+              <p className="italic text-zinc-500 dark:text-zinc-400">
+                Menggunakan sapaan bawaan (&ldquo;Hi apa kabar, ada yang mau di tanya seputar cat
+                atau lainnya?&rdquo;)
+              </p>
+            )}
+          </div>
+
+          <form
+            onSubmit={(e) => void handleSaveLiveGreeting(e)}
+            className="rounded-2xl border border-zinc-200 dark:border-[#242C44] bg-zinc-50/80 dark:bg-[#0B0F1A] p-3 space-y-2.5"
+          >
+            <div className="flex items-center justify-between">
+              <label
+                htmlFor="live-greeting-textarea"
+                className="text-xs font-semibold text-zinc-800 dark:text-zinc-200"
+              >
+                Teks Kata-Kata Awal AI Live
+              </label>
+              <span className="text-[10px] text-zinc-400">{liveGreetingInput.length}/500</span>
+            </div>
+            <textarea
+              id="live-greeting-textarea"
+              value={liveGreetingInput}
+              onChange={(e) => setLiveGreetingInput(e.target.value)}
+              rows={3}
+              maxLength={500}
+              placeholder='Contoh: "Selamat datang di Toko Cat Sinar Warna! Lagi cari cat tembok, cat duco, atau warna oplos apa nih?"'
+              className="w-full rounded-xl border border-zinc-200 dark:border-[#2A3350] bg-white dark:bg-[#111626] px-3 py-2 text-xs text-zinc-900 placeholder:text-zinc-400 dark:text-zinc-100 focus:outline-none focus:border-blue-500 resize-none"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="submit"
+                disabled={savingLiveGreeting}
+                className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] px-3 text-xs font-semibold text-white hover:opacity-95 disabled:opacity-50 transition-opacity cursor-pointer"
+              >
+                <Save className="h-3.5 w-3.5" />
+                <span>
+                  {savingLiveGreeting ? 'Menyimpan...' : 'Simpan Kata Pembuka Live'}
+                </span>
+              </button>
+              {(savedLiveGreeting || liveGreetingInput.trim()) && (
+                <button
+                  type="button"
+                  disabled={savingLiveGreeting}
+                  onClick={() => void handleResetLiveGreeting()}
+                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-zinc-300 dark:border-[#2E3858] bg-white dark:bg-[#14192B] px-3 text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-[#1C233B] disabled:opacity-50 cursor-pointer"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>Bawaan</span>
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
       ) : (
         <div className="space-y-3">
           <p className="rounded-xl border border-blue-500/20 bg-blue-50/70 dark:bg-blue-950/25 px-3 py-2 text-[11px] leading-relaxed text-zinc-700 dark:text-zinc-300">
-            <strong>Pengingat Pribadi (Khusus Admin):</strong> Semua pengingat di sini hanya
-            aktif saat Admin login (dengan bahasa santai lu/gua) dan tersinkron otomatis ke seluruh
-            Admin. Pengingat Toko (2 cabang &amp; cat oplos) tetap aktif untuk semua pengguna.
+            <strong>Pengingat Pribadi (Khusus Admin+ &amp; Admin Utama):</strong> Semua pengingat di
+            sini aktif saat Admin+ atau Admin Utama login dan tersinkron otomatis. Admin biasa
+            tidak dapat melihat bagian ini.
           </p>
 
           <form
@@ -483,7 +727,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUser, compact = f
               onChange={(e) => setNewContent(e.target.value)}
               rows={2}
               maxLength={2000}
-              placeholder="Tulis hal yang ingin selalu diingat AI untuk semua Admin..."
+              placeholder="Tulis hal yang ingin selalu diingat AI..."
               className="w-full rounded-xl border border-zinc-200 dark:border-[#2A3350] bg-white dark:bg-[#111626] px-3 py-2 text-xs text-zinc-900 placeholder:text-zinc-400 dark:text-zinc-100 focus:outline-none focus:border-blue-500 resize-none"
             />
             <button

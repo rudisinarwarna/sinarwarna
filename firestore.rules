@@ -34,18 +34,6 @@ service cloud.firestore {
         request.auth.token.email == 'rudi.sinarwarna@gmail.com';
     }
 
-    function isAdmin() {
-      return isPrimaryAdmin() || (
-        isSignedIn() &&
-        isVerified() &&
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      );
-    }
-
-    function isOwner(userId) {
-      return isSignedIn() && isVerified() && request.auth.uid == userId;
-    }
-
     function isNotBlocked() {
       return !exists(/databases/$(database)/documents/users/$(request.auth.uid)) || (
         (
@@ -57,6 +45,71 @@ service cloud.firestore {
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.deleted != true
         )
       );
+    }
+
+    function isAnyAdmin() {
+      return isPrimaryAdmin() || (
+        isSignedIn() &&
+        isVerified() &&
+        isNotBlocked() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isAdminPlus() {
+      return isPrimaryAdmin() || (
+        isSignedIn() &&
+        isVerified() &&
+        isNotBlocked() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+        'level' in get(/databases/$(database)/documents/admins/$(request.auth.uid)).data &&
+        get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.level == 'admin_plus'
+      );
+    }
+
+    function targetIsPrimaryAdmin(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId)) &&
+        'email' in get(/databases/$(database)/documents/users/$(userId)).data &&
+        get(/databases/$(database)/documents/users/$(userId)).data.email == 'rudi.sinarwarna@gmail.com';
+    }
+
+    function targetAdminLevel(userId) {
+      return targetIsPrimaryAdmin(userId)
+        ? 'primary'
+        : (
+          exists(/databases/$(database)/documents/admins/$(userId))
+            ? (
+              ('level' in get(/databases/$(database)/documents/admins/$(userId)).data &&
+               get(/databases/$(database)/documents/admins/$(userId)).data.level == 'admin_plus')
+                ? 'admin_plus'
+                : 'admin'
+            )
+            : (
+              exists(/databases/$(database)/documents/users/$(userId))
+                ? get(/databases/$(database)/documents/users/$(userId)).data.role
+                : 'user'
+            )
+        );
+    }
+
+    function canManageTargetUpdate(userId, nextRole) {
+      return !targetIsPrimaryAdmin(userId) && (
+        (isPrimaryAdmin() && nextRole in ['user', 'admin', 'admin_plus']) ||
+        (isAdminPlus() && !isPrimaryAdmin() && targetAdminLevel(userId) in ['user', 'admin'] && nextRole in ['user', 'admin']) ||
+        (isAnyAdmin() && !isAdminPlus() && targetAdminLevel(userId) == 'user' && nextRole in ['user', 'admin'])
+      );
+    }
+
+    function canManageTargetDelete(userId) {
+      return !targetIsPrimaryAdmin(userId) && (
+        isPrimaryAdmin() ||
+        (isAdminPlus() && !isPrimaryAdmin() && targetAdminLevel(userId) in ['user', 'admin']) ||
+        (isAnyAdmin() && !isAdminPlus() && targetAdminLevel(userId) == 'user')
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && isVerified() && request.auth.uid == userId;
     }
 
     function isParentConversationOwner(conversationId) {
@@ -77,7 +130,7 @@ service cloud.firestore {
         (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 500)) &&
         data.role is string &&
         data.role.size() <= 16 &&
-        data.role in ['user', 'admin'] &&
+        data.role in ['user', 'admin', 'admin_plus'] &&
         (!('verifiedBadge' in data) || data.verifiedBadge is bool) &&
         data.blocked is bool &&
         data.deleted is bool &&
@@ -87,11 +140,12 @@ service cloud.firestore {
 
     function isValidAdminGrant(data, userId) {
       return data.keys().hasAll(['uid', 'email', 'grantedBy', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['uid', 'email', 'grantedBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'level', 'grantedBy', 'createdAt', 'updatedAt']) &&
         isValidId(data.uid) &&
         data.uid == userId &&
         data.email is string &&
         data.email.size() <= 200 &&
+        (!('level' in data) || (data.level is string && data.level.size() <= 16 && data.level in ['admin', 'admin_plus'])) &&
         data.grantedBy is string &&
         data.grantedBy.size() >= 1 &&
         data.grantedBy.size() <= 128 &&
@@ -122,6 +176,18 @@ service cloud.firestore {
       return data.keys().hasAll(['seededDefaultMemories', 'updatedBy', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly(['seededDefaultMemories', 'updatedBy', 'createdAt', 'updatedAt']) &&
         data.seededDefaultMemories is bool &&
+        data.updatedBy is string &&
+        data.updatedBy.size() >= 1 &&
+        data.updatedBy.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidLiveSettings(data) {
+      return data.keys().hasAll(['greetingText', 'updatedBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['greetingText', 'updatedBy', 'createdAt', 'updatedAt']) &&
+        data.greetingText is string &&
+        data.greetingText.size() <= 500 &&
         data.updatedBy is string &&
         data.updatedBy.size() >= 1 &&
         data.updatedBy.size() <= 128 &&
@@ -171,13 +237,13 @@ service cloud.firestore {
 
     // Users Collection
     match /users/{userId} {
-      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow list: if isAdmin();
+      allow get: if isValidId(userId) && (isOwner(userId) || isAnyAdmin());
+      allow list: if isAnyAdmin();
       allow create: if isOwner(userId) &&
         isValidId(userId) &&
         incoming().uid == request.auth.uid &&
         isValidUserProfile(incoming(), userId) &&
-        (incoming().role == 'user' || (isPrimaryAdmin() && incoming().role == 'admin')) &&
+        (incoming().role == 'user' || (isPrimaryAdmin() && incoming().role in ['admin', 'admin_plus'])) &&
         (!('verifiedBadge' in incoming()) || incoming().verifiedBadge == false || (isPrimaryAdmin() && incoming().verifiedBadge == true)) &&
         incoming().blocked == false &&
         incoming().deleted == false &&
@@ -195,48 +261,68 @@ service cloud.firestore {
             (!('blocked' in existing()) ? incoming().blocked == false : incoming().blocked == existing().blocked) &&
             (!('deleted' in existing()) ? incoming().deleted == false : incoming().deleted == existing().deleted) &&
             (!('role' in existing())
-              ? (incoming().role == 'user' || (isPrimaryAdmin() && incoming().role == 'admin'))
-              : (incoming().role == existing().role || (isPrimaryAdmin() && incoming().role == 'admin'))) &&
+              ? (incoming().role == 'user' || (isPrimaryAdmin() && incoming().role in ['admin', 'admin_plus']))
+              : (incoming().role == existing().role || (isPrimaryAdmin() && incoming().role in ['admin', 'admin_plus']))) &&
             (!('verifiedBadge' in existing())
-              ? (!('verifiedBadge' in incoming()) || incoming().verifiedBadge == false || (isPrimaryAdmin() && incoming().verifiedBadge == true) || incoming().role == 'admin')
+              ? (!('verifiedBadge' in incoming()) || incoming().verifiedBadge == false || (isPrimaryAdmin() && incoming().verifiedBadge == true) || incoming().role in ['admin', 'admin_plus'])
               : (!('verifiedBadge' in incoming()) || incoming().verifiedBadge == existing().verifiedBadge || (isPrimaryAdmin() && incoming().verifiedBadge == true))) &&
             incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'role', 'verifiedBadge', 'blocked', 'deleted', 'updatedAt'])
           ) ||
           (
-            isAdmin() &&
-            (!('email' in existing()) || existing().email != 'rudi.sinarwarna@gmail.com') &&
+            request.auth.uid != userId &&
+            canManageTargetUpdate(userId, incoming().role) &&
+            (incoming().role == 'user' || incoming().verifiedBadge == true) &&
             incoming().diff(existing()).affectedKeys().hasOnly(['role', 'verifiedBadge', 'blocked', 'deleted', 'updatedAt'])
           )
         );
-      allow delete: if isAdmin() &&
-        isValidId(userId) &&
-        (!('email' in existing()) || existing().email != 'rudi.sinarwarna@gmail.com');
+      allow delete: if isValidId(userId) &&
+        request.auth.uid != userId &&
+        canManageTargetDelete(userId);
     }
 
     // Admin Grants Collection
     match /admins/{userId} {
-      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow list: if isAdmin();
+      allow get: if isValidId(userId) && (isOwner(userId) || isAnyAdmin());
+      allow list: if isAnyAdmin();
       allow create: if isValidId(userId) &&
         isValidAdminGrant(incoming(), userId) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        (isAdmin() || (isPrimaryAdmin() && request.auth.uid == userId));
-      allow update: if false;
-      allow delete: if isAdmin() &&
-        isValidId(userId) &&
-        existing().email != 'rudi.sinarwarna@gmail.com';
+        (
+          (isPrimaryAdmin() && request.auth.uid == userId && (!('level' in incoming()) || incoming().level == 'admin_plus')) ||
+          (isPrimaryAdmin() && !targetIsPrimaryAdmin(userId)) ||
+          (isAdminPlus() && !isPrimaryAdmin() && request.auth.uid != userId && targetAdminLevel(userId) in ['user', 'admin'] && (!('level' in incoming()) || incoming().level == 'admin')) ||
+          (isAnyAdmin() && !isAdminPlus() && request.auth.uid != userId && targetAdminLevel(userId) == 'user' && (!('level' in incoming()) || incoming().level == 'admin'))
+        );
+      allow update: if isValidId(userId) &&
+        isValidAdminGrant(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().email == existing().email &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['level', 'grantedBy', 'updatedAt']) &&
+        (
+          (isPrimaryAdmin() && request.auth.uid == userId && (!('level' in incoming()) || incoming().level == 'admin_plus')) ||
+          (isPrimaryAdmin() && !targetIsPrimaryAdmin(userId))
+        );
+      allow delete: if isValidId(userId) &&
+        request.auth.uid != userId &&
+        (!('email' in existing()) || existing().email != 'rudi.sinarwarna@gmail.com') &&
+        (
+          isPrimaryAdmin() ||
+          (isAdminPlus() && !isPrimaryAdmin() && targetAdminLevel(userId) in ['user', 'admin'])
+        );
     }
 
-    // Admin Private AI Memories Collection (shared across all admins, never accessible to non-admins)
+    // Admin+ & Primary Admin Private AI Memories Collection (never accessible to plain Admin or regular users)
     match /adminMemories/{memoryId} {
-      allow get, list: if isAdmin();
-      allow create: if isAdmin() &&
+      allow get, list: if isAdminPlus();
+      allow create: if isAdminPlus() &&
         isValidId(memoryId) &&
         isValidAdminMemory(incoming(), memoryId) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isAdmin() &&
+      allow update: if isAdminPlus() &&
         isValidId(memoryId) &&
         isValidAdminMemory(incoming(), memoryId) &&
         incoming().id == existing().id &&
@@ -244,19 +330,19 @@ service cloud.firestore {
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'content', 'updatedAt']);
-      allow delete: if isAdmin() && isValidId(memoryId);
+      allow delete: if isAdminPlus() && isValidId(memoryId);
     }
 
-    // Admin Metadata (one-time default memory seed flag)
+    // Admin+ Metadata (one-time default memory seed flag)
     match /adminMeta/{docId} {
-      allow get: if isAdmin() && docId == 'seed';
+      allow get: if isAdminPlus() && docId == 'seed';
       allow list: if false;
-      allow create: if isAdmin() &&
+      allow create: if isAdminPlus() &&
         docId == 'seed' &&
         isValidAdminSeedMeta(incoming()) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isAdmin() &&
+      allow update: if isAdminPlus() &&
         docId == 'seed' &&
         isValidAdminSeedMeta(incoming()) &&
         incoming().createdAt == existing().createdAt &&
@@ -265,15 +351,37 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // AI Live Opening Greeting Config (readable on single 'live' doc without PII; writable exclusively by Admin+ & Primary Admin)
+    match /appConfig/{docId} {
+      allow get: if isValidId(docId) && docId == 'live';
+      allow list: if false;
+      allow create: if isAdminPlus() &&
+        isValidId(docId) &&
+        docId == 'live' &&
+        isValidLiveSettings(incoming()) &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdminPlus() &&
+        isValidId(docId) &&
+        docId == 'live' &&
+        isValidLiveSettings(incoming()) &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['greetingText', 'updatedBy', 'updatedAt']);
+      allow delete: if false;
+    }
+
     // Conversations Collection
     match /conversations/{conversationId} {
       allow get: if isSignedIn() &&
         isVerified() &&
         isValidId(conversationId) &&
-        (existing().userId == request.auth.uid || isAdmin());
+        (existing().userId == request.auth.uid || isAnyAdmin());
       allow list: if isSignedIn() &&
         isVerified() &&
-        (resource.data.userId == request.auth.uid || isAdmin());
+        (resource.data.userId == request.auth.uid || isAnyAdmin());
       allow create: if isSignedIn() &&
         isVerified() &&
         isNotBlocked() &&
@@ -300,7 +408,7 @@ service cloud.firestore {
       allow delete: if isSignedIn() &&
         isVerified() &&
         isValidId(conversationId) &&
-        (existing().userId == request.auth.uid || isAdmin());
+        (existing().userId == request.auth.uid || isAnyAdmin());
 
       // Messages Subcollection
       match /messages/{messageId} {
@@ -308,10 +416,10 @@ service cloud.firestore {
           isVerified() &&
           isValidId(conversationId) &&
           isValidId(messageId) &&
-          ((existing().userId == request.auth.uid && isParentConversationOwner(conversationId)) || isAdmin());
+          ((existing().userId == request.auth.uid && isParentConversationOwner(conversationId)) || isAnyAdmin());
         allow list: if isSignedIn() &&
           isVerified() &&
-          (resource.data.userId == request.auth.uid || isAdmin());
+          (resource.data.userId == request.auth.uid || isAnyAdmin());
         allow create: if isSignedIn() &&
           isVerified() &&
           isNotBlocked() &&
@@ -342,7 +450,7 @@ service cloud.firestore {
           isVerified() &&
           isValidId(conversationId) &&
           isValidId(messageId) &&
-          ((existing().userId == request.auth.uid && isParentConversationOwner(conversationId)) || isAdmin());
+          ((existing().userId == request.auth.uid && isParentConversationOwner(conversationId)) || isAnyAdmin());
       }
     }
   }

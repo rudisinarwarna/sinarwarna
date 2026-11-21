@@ -19,6 +19,9 @@ import type { ChatMessage, Conversation, CreativeModeId } from '../types/chat';
 
 export const PRIMARY_ADMIN_EMAIL = 'rudi.sinarwarna@gmail.com';
 
+export type UserRole = 'user' | 'admin' | 'admin_plus';
+export type AdminLevel = 'none' | 'admin' | 'admin_plus' | 'primary';
+
 export function toMillis(ts: unknown): number {
   if (ts instanceof Timestamp) return ts.toMillis();
   if (typeof ts === 'number') return ts;
@@ -52,8 +55,14 @@ export function isPrimaryAdminUser(user: User | null | undefined): boolean {
   );
 }
 
+export function normalizeUserRole(raw: unknown): UserRole {
+  if (raw === 'admin_plus') return 'admin_plus';
+  if (raw === 'admin') return 'admin';
+  return 'user';
+}
+
 export interface UpsertProfileResult {
-  role: 'admin' | 'user';
+  role: UserRole;
   verifiedBadge: boolean;
   blocked: boolean;
   deleted: boolean;
@@ -75,7 +84,7 @@ export async function upsertUserProfile(user: User): Promise<UpsertProfileResult
   try {
     const snap = await getDoc(userRef);
     if (!snap.exists()) {
-      const role: 'admin' | 'user' = primaryAdmin ? 'admin' : 'user';
+      const role: UserRole = primaryAdmin ? 'admin_plus' : 'user';
       const verifiedBadge = primaryAdmin;
       const payload: Record<string, unknown> = {
         uid,
@@ -100,10 +109,9 @@ export async function upsertUserProfile(user: User): Promise<UpsertProfileResult
     const existing = snap.data();
     const blocked = existing.blocked === true;
     const deleted = existing.deleted === true;
-    const role: 'admin' | 'user' =
-      primaryAdmin || existing.role === 'admin' ? 'admin' : 'user';
+    const role: UserRole = primaryAdmin ? 'admin_plus' : normalizeUserRole(existing.role);
     const verifiedBadge =
-      primaryAdmin || role === 'admin' || existing.verifiedBadge === true;
+      primaryAdmin || role !== 'user' || existing.verifiedBadge === true;
 
     if (blocked || deleted) {
       return { role: 'user', verifiedBadge: false, blocked, deleted };
@@ -140,9 +148,16 @@ async function ensurePrimaryAdminGrant(user: User): Promise<void> {
     if (!snap.exists()) {
       await setDoc(adminRef, {
         uid,
-        email: (user.email || PRIMARY_ADMIN_EMAIL).trim().toLowerCase().slice(0, 200),
+        email: (extractUserEmail(user) || PRIMARY_ADMIN_EMAIL).slice(0, 200),
+        level: 'admin_plus',
         grantedBy: uid,
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } else if (snap.data()?.level !== 'admin_plus') {
+      await updateDoc(adminRef, {
+        level: 'admin_plus',
+        grantedBy: uid,
         updatedAt: serverTimestamp(),
       });
     }

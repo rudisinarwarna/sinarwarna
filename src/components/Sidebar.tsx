@@ -8,7 +8,6 @@ import {
   Plus,
   Search,
   Settings,
-  ShieldCheck,
   Trash2,
   X,
 } from 'lucide-react';
@@ -32,7 +31,6 @@ interface SidebarProps {
   onNewChat: () => void;
   onSelectConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
-  onOpenAdmin: () => void;
   onOpenSettings: () => void;
   onSignIn: () => void;
   onSignOut: () => void;
@@ -54,7 +52,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onNewChat,
   onSelectConversation,
   onDeleteConversation,
-  onOpenAdmin,
   onOpenSettings,
   onSignIn,
   onSignOut,
@@ -203,25 +200,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* Bottom Administrator, Settings & Firebase Account */}
+      {/* Bottom Settings & Firebase Account */}
       <div className="border-t border-zinc-200/80 dark:border-[#242C44] p-3 space-y-1.5">
-        {isAdmin && (
-          <button
-            type="button"
-            onClick={() => {
-              onOpenAdmin();
-              onCloseMobile();
-            }}
-            className="flex min-h-[44px] w-full items-center justify-between rounded-xl border border-blue-500/30 bg-gradient-to-r from-[#E51D2B]/12 to-[#0A36FF]/15 px-3 text-xs font-semibold text-[#0A36FF] dark:text-blue-200 hover:from-[#E51D2B]/20 hover:to-[#0A36FF]/24 transition-colors cursor-pointer"
-          >
-            <span className="flex items-center gap-2.5">
-              <ShieldCheck className="h-4 w-4 text-[#E51D2B] dark:text-[#FF4D5A]" />
-              <span>Administrator</span>
-            </span>
-            <VerifiedBlueBadge size="xs" title="Admin Terverifikasi" />
-          </button>
-        )}
-
         <button
           type="button"
           onClick={() => {

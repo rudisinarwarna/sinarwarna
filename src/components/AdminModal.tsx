@@ -1,15 +1,22 @@
 import React from 'react';
 import type { User } from 'firebase/auth';
 import { ShieldCheck, X } from 'lucide-react';
+import type { AdminLevel } from '../services/adminService';
 import { AdminPanel } from './AdminPanel';
 
 interface AdminModalProps {
   isOpen: boolean;
   currentUser: User | null;
+  adminLevel: AdminLevel;
   onClose: () => void;
 }
 
-export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, currentUser, onClose }) => {
+export const AdminModal: React.FC<AdminModalProps> = ({
+  isOpen,
+  currentUser,
+  adminLevel,
+  onClose,
+}) => {
   if (!isOpen) return null;
 
   return (
@@ -35,7 +42,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, currentUser, onC
                 Administrator Sinar Warna
               </h2>
               <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                Kelola akun pengguna, hak admin, &amp; pengingat pribadi AI
+                {adminLevel === 'admin'
+                  ? 'Kelola akun pengguna biasa'
+                  : 'Kelola akun pengguna, level admin, & pengingat pribadi AI'}
               </p>
             </div>
           </div>
@@ -51,7 +60,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, currentUser, onC
         </div>
 
         <div className="max-h-[82dvh] overflow-y-auto p-5">
-          <AdminPanel currentUser={currentUser} />
+          <AdminPanel currentUser={currentUser} adminLevel={adminLevel} />
         </div>
       </div>
     </div>

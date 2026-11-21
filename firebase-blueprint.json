@@ -30,9 +30,9 @@
         },
         "role": {
           "type": "string",
-          "enum": ["user", "admin"],
+          "enum": ["user", "admin", "admin_plus"],
           "maxLength": 16,
-          "description": "Authorization role."
+          "description": "Authorization role across user, plain admin, and admin plus tiers."
         },
         "verifiedBadge": {
           "type": "boolean",
@@ -76,6 +76,12 @@
           "maxLength": 200,
           "description": "Email address of the admin."
         },
+        "level": {
+          "type": "string",
+          "enum": ["admin", "admin_plus"],
+          "maxLength": 16,
+          "description": "Administrator privilege tier."
+        },
         "grantedBy": {
           "type": "string",
           "minLength": 1,
@@ -95,7 +101,7 @@
     },
     "AdminMemory": {
       "title": "AdminMemory",
-      "description": "Shared private AI memory visible exclusively to authenticated admins.",
+      "description": "Shared private AI memory visible exclusively to Admin+ and Primary Admin.",
       "type": "object",
       "properties": {
         "id": {
@@ -115,13 +121,13 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2000,
-          "description": "Private memory fact known across all admins."
+          "description": "Private memory fact known across Admin+ and Primary Admin."
         },
         "createdBy": {
           "type": "string",
           "minLength": 1,
           "maxLength": 128,
-          "description": "UID of the admin or seed script that recorded this memory."
+          "description": "UID of the admin who recorded this memory."
         },
         "createdByEmail": {
           "type": "string",
@@ -162,6 +168,33 @@
         }
       },
       "required": ["seededDefaultMemories", "updatedBy", "createdAt", "updatedAt"]
+    },
+    "AppLiveSettings": {
+      "title": "AppLiveSettings",
+      "description": "Configuration for AI Live opening words controlled exclusively by Admin+ and Primary Admin.",
+      "type": "object",
+      "properties": {
+        "greetingText": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Custom opening words spoken by AI Live when started; empty string falls back to default."
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "UID of the Admin+ or Primary Admin who updated the Live greeting."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["greetingText", "updatedBy", "createdAt", "updatedAt"]
     },
     "Conversation": {
       "title": "Conversation",
@@ -265,19 +298,23 @@
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
-      "description": "Per-user profile, readable/writable by owner (limited fields) and managed by verified admins."
+      "description": "Per-user profile, readable/writable by owner (limited fields) and managed across tiered admins."
     },
     "/admins/{userId}": {
       "schema": { "$ref": "#/entities/AdminGrant" },
-      "description": "Verified administrator registry managed by admins."
+      "description": "Verified administrator registry with admin and admin_plus tiers."
     },
     "/adminMemories/{memoryId}": {
       "schema": { "$ref": "#/entities/AdminMemory" },
-      "description": "Shared private AI memories visible and writable exclusively by admins."
+      "description": "Shared private AI memories visible and writable exclusively by Admin+ and Primary Admin."
     },
     "/adminMeta/{docId}": {
       "schema": { "$ref": "#/entities/AdminSeedMeta" },
-      "description": "Admin-only seed status document."
+      "description": "Admin+ seed status document."
+    },
+    "/appConfig/{docId}": {
+      "schema": { "$ref": "#/entities/AppLiveSettings" },
+      "description": "Publicly readable AI Live opening greeting config writable exclusively by Admin+ and Primary Admin."
     },
     "/conversations/{conversationId}": {
       "schema": { "$ref": "#/entities/Conversation" },

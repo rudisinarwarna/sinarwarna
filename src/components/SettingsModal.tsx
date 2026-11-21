@@ -12,6 +12,7 @@ import {
   Sun,
   X,
 } from 'lucide-react';
+import type { AdminLevel } from '../services/adminService';
 import { AdminPanel } from './AdminPanel';
 import { SinarLogo } from './SinarLogo';
 
@@ -22,6 +23,7 @@ interface SettingsModalProps {
   isInstalled: boolean;
   isIOS: boolean;
   isAdmin?: boolean;
+  adminLevel?: AdminLevel;
   currentUser?: User | null;
   onClose: () => void;
   onSetTheme: (dark: boolean) => void;
@@ -35,6 +37,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isInstalled,
   isIOS,
   isAdmin = false,
+  adminLevel = 'none',
   currentUser = null,
   onClose,
   onSetTheme,
@@ -136,7 +139,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         <div className="max-h-[78dvh] overflow-y-auto p-5 space-y-6">
           {isAdmin && activeTab === 'admin' ? (
-            <AdminPanel currentUser={currentUser} compact />
+            <AdminPanel currentUser={currentUser} adminLevel={adminLevel} compact />
           ) : (
             <>
               {/* Pengaturan Cahaya / Tema */}

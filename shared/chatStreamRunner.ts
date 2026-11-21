@@ -60,7 +60,7 @@ export async function runChatStreamWithTools(params: {
 }): Promise<void> {
   const { ai, mode, thinkingDepth, authContext, abortSignal, onEvent } = params;
 
-  const effectiveMemories = authContext.isAdmin
+  const effectiveMemories = authContext.canAccessAdminMemories
     ? authContext.adminMemories.length > 0 || authContext.seedMetaExists
       ? [...authContext.adminMemories]
       : [...DEFAULT_ADMIN_PRIVATE_MEMORIES]
@@ -68,14 +68,14 @@ export async function runChatStreamWithTools(params: {
 
   let workingContents: Content[] = [...params.contents];
   const attempts = getChatAttempts(thinkingDepth);
-  const tools = getChatToolsForUser(authContext.isAdmin);
+  const tools = getChatToolsForUser(authContext.canAccessAdminMemories);
 
   for (let turn = 0; turn < 3; turn++) {
     if (abortSignal.aborted) break;
 
     const systemInstruction = buildChatSystemInstruction({
       mode,
-      isAdmin: authContext.isAdmin,
+      isAdmin: authContext.canAccessAdminMemories,
       adminMemories: effectiveMemories,
     });
 

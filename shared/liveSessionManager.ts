@@ -5,6 +5,7 @@ import {
 } from '@google/genai';
 import {
   deleteAdminMemoriesByKeywordServer,
+  fetchLiveOpeningGreetingServer,
   saveAdminMemoryServer,
   type ServerAuthContext,
 } from './firebaseServerAuth.ts';
@@ -44,7 +45,8 @@ export function createLiveBridge(params: {
   const { ai, mode, authContext, sendJson, closeClient, onDone } = params;
 
   let currentVoice: CanonicalVoiceId = normalizePersonaId(params.initialVoice);
-  const adminMemories = authContext.isAdmin
+  const canUseAdminMemories = authContext.canAccessAdminMemories;
+  const adminMemories = canUseAdminMemories
     ? authContext.adminMemories.length > 0 || authContext.seedMetaExists
       ? [...authContext.adminMemories]
       : [...DEFAULT_ADMIN_PRIVATE_MEMORIES]
@@ -58,6 +60,7 @@ export function createLiveBridge(params: {
   let owieCaptionSentThisTurn = false;
   let lastOwieCaptionAt = 0;
   let owieRawBuffer = '';
+  let customOpeningGreeting = '';
 
   const recentTurns: string[] = [];
   const pendingInputs: LiveClientMessage[] = [];
@@ -65,8 +68,8 @@ export function createLiveBridge(params: {
   const pushRecentTurn = (line: string) => {
     const clean = line.trim();
     if (!clean) return;
-    recentTurns.push(clean.slice(0, 200));
-    if (recentTurns.length > 6) {
+    recentTurns.push(clean.slice(0, 180));
+    if (recentTurns.length > 5) {
       recentTurns.shift();
     }
   };
@@ -103,6 +106,7 @@ export function createLiveBridge(params: {
 
     isSwapping = true;
     pendingSwitchTarget = null;
+    pendingInputs.length = 0;
     clearSwitchTimer();
 
     const prevVoice = currentVoice;
@@ -148,10 +152,11 @@ export function createLiveBridge(params: {
 
     const { voiceName, liveSystemInstruction, greetingPrompt, tools } =
       buildLivePersonaSessionConfig(targetVoice, mode, {
-        isAdmin: authContext.isAdmin,
+        isAdmin: canUseAdminMemories,
         adminMemories,
         handoffFrom,
         recentContext: recentTurns.join(' | '),
+        customOpeningGreeting: !handoffFrom ? customOpeningGreeting : undefined,
       });
 
     let thisSession: LiveSession | null = null;
@@ -211,7 +216,7 @@ export function createLiveBridge(params: {
                       if (pendingSwitchTarget && !closedByClient) {
                         void performPersonaHandoff(pendingSwitchTarget);
                       }
-                    }, 5200);
+                    }, currentVoice === 'owie' ? 2200 : 5200);
                     responses.push({
                       id: fc.id,
                       name,
@@ -220,8 +225,8 @@ export function createLiveBridge(params: {
                         targetPersona: PERSONA_DISPLAY_NAMES[requested],
                         instruction:
                           currentVoice === 'owie'
-                            ? `Panggil owie_caption bahwa kamu akan memanggilkan ${PERSONA_DISPLAY_NAMES[requested]}, lalu menggonggonglah sekali saja tanpa kata manusia.`
-                            : `Ucapkan sekarang dengan singkat dan ramah bahwa kamu akan memanggilkan ${PERSONA_DISPLAY_NAMES[requested]} (misalnya: "Ok tunggu sebentar, akan saya panggilkan ${PERSONA_DISPLAY_NAMES[requested]}").`,
+                            ? `Panggil owie_caption bahwa Owie akan memanggilkan ${PERSONA_DISPLAY_NAMES[requested]}, lalu akhiri giliranmu singkat.`
+                            : `Ucapkan sekarang dengan singkat dan ramah menggunakan suaramu sendiri bahwa kamu akan memanggilkan ${PERSONA_DISPLAY_NAMES[requested]} (misalnya: "Ok tunggu sebentar, akan saya panggilkan ${PERSONA_DISPLAY_NAMES[requested]}").`,
                       },
                     });
                   }
@@ -230,10 +235,11 @@ export function createLiveBridge(params: {
                   if (replyText) {
                     owieCaptionSentThisTurn = true;
                     lastOwieCaptionAt = Date.now();
-                    pushRecentTurn(`Owie: ${replyText}`);
+                    pushRecentTurn(`Topik Owie: ${replyText}`);
                     sendJson({
                       outputTranscript: replyText,
                       fromOwieCaption: true,
+                      owieBark: true,
                       voice: 'owie',
                     });
                   }
@@ -243,12 +249,13 @@ export function createLiveBridge(params: {
                     response: {
                       ok: true,
                       captionDisplayed: true,
+                      barkPlayed: true,
                       nextStep:
-                        "Sekarang SEGERA keluarkan SUARA GONGGONGAN anjing Chihuahua asli ('Guk! Guk! Yap yap! Arf!') TANPA mengucapkan satu pun kata manusia!",
+                        "Teks jawaban sudah tampil di layar dan suara gonggongan Chihuahua asli sudah diputar. Selesaikan giliranmu sekarang dengan singkat ('Guk!').",
                     },
                   });
                 } else if (name === 'save_admin_memory') {
-                  if (authContext.isAdmin && authContext.idToken && authContext.uid) {
+                  if (canUseAdminMemories && authContext.idToken && authContext.uid) {
                     const title = String(args.title || 'Pengingat Pribadi').trim();
                     const content = String(args.content || '').trim();
                     const saved = await saveAdminMemoryServer({
@@ -275,11 +282,14 @@ export function createLiveBridge(params: {
                     responses.push({
                       id: fc.id,
                       name,
-                      response: { ok: false, error: 'Khusus akun admin terverifikasi.' },
+                      response: {
+                        ok: false,
+                        error: 'Khusus akun Admin+ atau Admin Utama terverifikasi.',
+                      },
                     });
                   }
                 } else if (name === 'delete_admin_memory') {
-                  if (authContext.isAdmin && authContext.idToken) {
+                  if (canUseAdminMemories && authContext.idToken) {
                     const keyword = String(args.keyword || '').trim();
                     const deleted = await deleteAdminMemoriesByKeywordServer({
                       idToken: authContext.idToken,
@@ -310,7 +320,10 @@ export function createLiveBridge(params: {
                     responses.push({
                       id: fc.id,
                       name,
-                      response: { ok: false, error: 'Khusus akun admin terverifikasi.' },
+                      response: {
+                        ok: false,
+                        error: 'Khusus akun Admin+ atau Admin Utama terverifikasi.',
+                      },
                     });
                   }
                 }
@@ -328,7 +341,7 @@ export function createLiveBridge(params: {
 
           const content = message.serverContent;
           if (content?.inputTranscription?.text) {
-            pushRecentTurn(`User: ${content.inputTranscription.text}`);
+            pushRecentTurn(`Pengguna: ${content.inputTranscription.text}`);
             sendJson({ inputTranscript: content.inputTranscription.text });
           }
 
@@ -336,9 +349,7 @@ export function createLiveBridge(params: {
             if (currentVoice === 'owie') {
               owieRawBuffer += content.outputTranscription.text;
             } else {
-              pushRecentTurn(
-                `${PERSONA_DISPLAY_NAMES[currentVoice]}: ${content.outputTranscription.text}`
-              );
+              pushRecentTurn(`Topik: ${content.outputTranscription.text}`);
               sendJson({
                 outputTranscript: content.outputTranscription.text,
                 voice: currentVoice,
@@ -347,8 +358,8 @@ export function createLiveBridge(params: {
           }
 
           for (const part of content?.modelTurn?.parts ?? []) {
-            if (part.inlineData?.data) {
-              sendJson({ audio: part.inlineData.data });
+            if (part.inlineData?.data && currentVoice !== 'owie') {
+              sendJson({ audio: part.inlineData.data, voice: currentVoice });
             }
           }
 
@@ -361,8 +372,9 @@ export function createLiveBridge(params: {
               const recentlyCaptioned = Date.now() - lastOwieCaptionAt < 12000;
               if (!owieCaptionSentThisTurn && !recentlyCaptioned && owieRawBuffer.trim()) {
                 sendJson({
-                  outputTranscript: `[Owie menggonggong] ${owieRawBuffer.trim()}`,
+                  outputTranscript: owieRawBuffer.trim(),
                   fromOwieCaption: true,
+                  owieBark: true,
                   voice: 'owie',
                 });
               }
@@ -429,6 +441,8 @@ export function createLiveBridge(params: {
 
   return {
     start: async () => {
+      customOpeningGreeting = await fetchLiveOpeningGreetingServer().catch(() => '');
+      if (closedByClient) return;
       await connectPersonaSession(currentVoice, null);
     },
     handleClientMessage: (msg: LiveClientMessage) => {

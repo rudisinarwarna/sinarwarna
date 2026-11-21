@@ -42,6 +42,12 @@ interface TranscriptEntry {
   isOwieBarkTranslation?: boolean;
 }
 
+const OWIE_BARK_CLIPS = [
+  '/assets/sounds/owie-bark-1.mp3',
+  '/assets/sounds/owie-bark-2.mp3',
+  '/assets/sounds/owie-bark-3.mp3',
+] as const;
+
 function getPersonaLabel(id: string | undefined): string {
   return VOICE_OPTIONS.find((item) => item.id === id)?.label || 'Santi';
 }
@@ -129,6 +135,9 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   const isMutedRef = useRef(isMuted);
   const isPausedRef = useRef(isPaused);
   const voiceRef = useRef<VoicePersonaId>(voice);
+  const userRef = useRef<User | null>(user);
+  const owieBuffersRef = useRef<AudioBuffer[]>([]);
+  const owieBarkCursorRef = useRef<number>(0);
   const transcriptsRef = useRef<TranscriptEntry[]>([]);
   const transcriptsEndRef = useRef<HTMLDivElement>(null);
 
@@ -143,6 +152,10 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   useEffect(() => {
     voiceRef.current = voice;
   }, [voice]);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   useEffect(() => {
     setIsCameraOn(initialCameraOn);
@@ -293,6 +306,80 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     source.start(startAt);
   }, []);
 
+  const preloadOwieBarks = useCallback(async (outCtx: AudioContext) => {
+    if (owieBuffersRef.current.length > 0) return;
+    try {
+      const loaded: AudioBuffer[] = [];
+      for (const clipUrl of OWIE_BARK_CLIPS) {
+        const res = await fetch(clipUrl);
+        if (!res.ok) continue;
+        const arr = await res.arrayBuffer();
+        const decoded = await outCtx.decodeAudioData(arr);
+        loaded.push(decoded);
+      }
+      if (loaded.length > 0) {
+        owieBuffersRef.current = loaded;
+      }
+    } catch {
+      // Fallback HTMLAudioElement handles playback if decode fails
+    }
+  }, []);
+
+  const playChihuahuaBark = useCallback(() => {
+    if (isPausedRef.current) return;
+    const buffers = owieBuffersRef.current;
+    const outCtx = outputAudioCtxRef.current;
+    const clipIndex = owieBarkCursorRef.current % OWIE_BARK_CLIPS.length;
+    owieBarkCursorRef.current += 1;
+
+    if (outCtx && buffers.length > 0) {
+      if (outCtx.state === 'suspended') {
+        void outCtx.resume();
+      }
+      const buffer = buffers[clipIndex % buffers.length];
+      const source = outCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(outCtx.destination);
+
+      const now = outCtx.currentTime;
+      const startAt = Math.max(now, nextStartTimeRef.current);
+      nextStartTimeRef.current = startAt + buffer.duration;
+
+      activeSourcesRef.current.add(source);
+      setStatus('speaking');
+
+      source.onended = () => {
+        activeSourcesRef.current.delete(source);
+        if (activeSourcesRef.current.size === 0 && !isPausedRef.current) {
+          setStatus('listening');
+        }
+      };
+
+      source.start(startAt);
+      return;
+    }
+
+    try {
+      const audioEl = new Audio(OWIE_BARK_CLIPS[clipIndex]);
+      setStatus('speaking');
+      audioEl.onended = () => {
+        if (!isPausedRef.current) {
+          setStatus('listening');
+        }
+      };
+      audioEl.onerror = () => {
+        if (!isPausedRef.current) {
+          setStatus('listening');
+        }
+      };
+      void audioEl.play().catch(() => {
+        if (!isPausedRef.current) setStatus('listening');
+      });
+    } catch {
+      // Ignore audio element error
+    }
+  }, []);
+
   useEffect(() => {
     if (!isOpen) {
       cleanupSession();
@@ -332,8 +419,10 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         }
         inputAudioCtxRef.current = inputCtx;
         outputAudioCtxRef.current = outputCtx;
+        owieBuffersRef.current = [];
+        void preloadOwieBarks(outputCtx);
 
-        const idToken = await user?.getIdToken().catch(() => null);
+        const idToken = await userRef.current?.getIdToken().catch(() => null);
         if (cancelled) return;
 
         const wsUrl = buildLiveWsUrl(connectTriggerVoice, activeMode, idToken);
@@ -351,6 +440,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
               switchedVoiceReady?: VoicePersonaId;
               handoffNotice?: string;
               audio?: string;
+              owieBark?: boolean;
               inputTranscript?: string;
               outputTranscript?: string;
               fromOwieCaption?: boolean;
@@ -368,6 +458,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
             }
 
             if (msg.switchingVoice) {
+              stopPlaybackQueue();
               voiceRef.current = msg.switchingVoice;
               setVoice(msg.switchingVoice);
               setHandoffNotice(
@@ -376,6 +467,8 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
             }
 
             if (msg.switchedVoiceReady) {
+              voiceRef.current = msg.switchedVoiceReady;
+              setVoice(msg.switchedVoiceReady);
               setHandoffNotice(null);
               if (activeSourcesRef.current.size === 0 && !isPausedRef.current) {
                 setStatus('listening');
@@ -391,7 +484,15 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
               stopPlaybackQueue();
               if (!isPausedRef.current) setStatus('listening');
             }
-            if (msg.audio) {
+            if (msg.owieBark) {
+              playChihuahuaBark();
+            }
+            if (
+              msg.audio &&
+              voiceRef.current !== 'owie' &&
+              msg.voice !== 'owie' &&
+              (!msg.voice || msg.voice === voiceRef.current)
+            ) {
               playAudioChunk24k(msg.audio);
             }
             if (msg.inputTranscript) {
@@ -474,8 +575,10 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     connectTriggerVoice,
     isOpen,
     playAudioChunk24k,
+    playChihuahuaBark,
+    preloadOwieBarks,
     stopPlaybackQueue,
-    user,
+    user?.uid,
   ]);
 
   useEffect(() => {
