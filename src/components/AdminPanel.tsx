@@ -7,6 +7,7 @@ import {
   BookOpen,
   CheckCircle2,
   Crown,
+  Globe,
   Mic,
   Plus,
   RotateCcw,
@@ -19,23 +20,30 @@ import {
   Trash2,
   UserCheck,
   Users,
+  Zap,
 } from 'lucide-react';
 import {
   addAdminMemory,
+  addPublicMemory,
   canManageUserRecord,
   deleteAdminMemory,
+  deletePublicMemory,
   deleteUserAccount,
   saveLiveOpeningGreeting,
   seedDefaultAdminMemoriesOnce,
+  setFreewillMode,
   setUserBlocked,
   setUserRoleLevel,
   setUserVerifiedBadge,
   subscribeAdminMemories,
   subscribeAllUsers,
+  subscribeFreewillConfig,
   subscribeLiveOpeningGreeting,
+  subscribePublicMemories,
   type AdminLevel,
   type AdminMemoryDoc,
   type ManagedUserRecord,
+  type PublicMemoryDoc,
   type UserRole,
 } from '../services/adminService';
 import { VerifiedBlueBadge } from './VerifiedBlueBadge';
@@ -60,27 +68,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 }) => {
   const canAccessMemories = adminLevel === 'primary' || adminLevel === 'admin_plus';
 
-  const [subTab, setSubTab] = useState<'users' | 'liveGreeting' | 'memories'>('users');
+  const [subTab, setSubTab] = useState<'users' | 'publicMemories' | 'liveGreeting' | 'memories'>('users');
   const [users, setUsers] = useState<ManagedUserRecord[]>([]);
   const [memories, setMemories] = useState<AdminMemoryDoc[]>([]);
+  const [publicMemories, setPublicMemories] = useState<PublicMemoryDoc[]>([]);
   const [userSearch, setUserSearch] = useState('');
   const [busyUid, setBusyUid] = useState<string | null>(null);
   const [confirmDeleteUid, setConfirmDeleteUid] = useState<string | null>(null);
   const [busyMemoryId, setBusyMemoryId] = useState<string | null>(null);
   const [confirmDeleteMemId, setConfirmDeleteMemId] = useState<string | null>(null);
+  const [busyPublicMemId, setBusyPublicMemId] = useState<string | null>(null);
+  const [confirmDeletePublicMemId, setConfirmDeletePublicMemId] = useState<string | null>(null);
 
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
   const [savingMemory, setSavingMemory] = useState(false);
 
+  const [newPublicTitle, setNewPublicTitle] = useState('');
+  const [newPublicContent, setNewPublicContent] = useState('');
+  const [savingPublicMemory, setSavingPublicMemory] = useState(false);
+
   const [savedLiveGreeting, setSavedLiveGreeting] = useState('');
   const [liveGreetingInput, setLiveGreetingInput] = useState('');
   const [savingLiveGreeting, setSavingLiveGreeting] = useState(false);
 
+  const [freewillEnabled, setFreewillEnabled] = useState(false);
+  const [togglingFreewill, setTogglingFreewill] = useState(false);
+  const [confirmFreewillOn, setConfirmFreewillOn] = useState(false);
+
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
-    if (!canAccessMemories && subTab !== 'users') {
+    if (!canAccessMemories && (subTab === 'liveGreeting' || subTab === 'memories')) {
       setSubTab('users');
     }
   }, [canAccessMemories, subTab]);
@@ -92,6 +111,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       (list) => setUsers(list),
       (err) => setFeedback({ type: 'err', text: err.message })
     );
+
+    const unsubPublicMemories = subscribePublicMemories(
+      (list) => setPublicMemories(list),
+      (err) => setFeedback({ type: 'err', text: err.message })
+    );
+
+    let unsubFreewill: (() => void) | undefined;
+    if (adminLevel === 'primary') {
+      unsubFreewill = subscribeFreewillConfig(
+        (enabled) => {
+          setFreewillEnabled(enabled);
+          if (enabled) setConfirmFreewillOn(false);
+        },
+        (err) => setFeedback({ type: 'err', text: err.message })
+      );
+    } else {
+      setFreewillEnabled(false);
+      setConfirmFreewillOn(false);
+    }
 
     let unsubMemories: (() => void) | undefined;
     let unsubLiveGreeting: (() => void) | undefined;
@@ -118,10 +156,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     return () => {
       unsubUsers();
+      unsubPublicMemories();
+      unsubFreewill?.();
       unsubMemories?.();
       unsubLiveGreeting?.();
     };
-  }, [canAccessMemories, currentUser]);
+  }, [adminLevel, canAccessMemories, currentUser]);
 
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
@@ -226,6 +266,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
+  const handleToggleFreewill = async (nextEnabled: boolean) => {
+    if (!currentUser || adminLevel !== 'primary' || togglingFreewill) return;
+    setTogglingFreewill(true);
+    setConfirmFreewillOn(false);
+    setFeedback(null);
+    try {
+      await setFreewillMode({
+        primaryAdminUser: currentUser,
+        enabled: nextEnabled,
+        memories,
+      });
+      setFreewillEnabled(nextEnabled);
+      setFeedback({
+        type: 'ok',
+        text: nextEnabled
+          ? 'FREEWILL AKTIF: Semua pengguna terdaftar & tamu belum daftar mendapat efek Admin (bahasa semi-gaul & pengingat AI), sementara tamu tetap tidak melihat panel Admin.'
+          : 'FREEWILL NONAKTIF: Hak akses kembali ke level akun masing-masing.',
+      });
+    } catch (err) {
+      setFeedback({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Gagal mengubah mode FREEWILL.',
+      });
+    } finally {
+      setTogglingFreewill(false);
+    }
+  };
+
+  const handlePressFreewillButton = () => {
+    if (!currentUser || adminLevel !== 'primary' || togglingFreewill) return;
+    if (!freewillEnabled) {
+      setConfirmFreewillOn(true);
+      return;
+    }
+    void handleToggleFreewill(false);
+  };
+
   const handleAddMemory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !canAccessMemories || savingMemory) return;
@@ -235,12 +312,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
     setSavingMemory(true);
     setFeedback(null);
+    const memTitle = newTitle.trim() || 'Pengingat Pribadi';
+    const memContent = newContent.trim();
     try {
       await addAdminMemory({
         adminUser: currentUser,
-        title: newTitle.trim() || 'Pengingat Pribadi',
-        content: newContent.trim(),
+        title: memTitle,
+        content: memContent,
       });
+      if (adminLevel === 'primary' && freewillEnabled) {
+        await setFreewillMode({
+          primaryAdminUser: currentUser,
+          enabled: true,
+          memories: [{ title: memTitle, content: memContent }, ...memories],
+        }).catch(() => {});
+      }
       setNewTitle('');
       setNewContent('');
       setFeedback({
@@ -263,6 +349,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setFeedback(null);
     try {
       await deleteAdminMemory(mem.id);
+      if (currentUser && adminLevel === 'primary' && freewillEnabled) {
+        await setFreewillMode({
+          primaryAdminUser: currentUser,
+          enabled: true,
+          memories: memories.filter((m) => m.id !== mem.id),
+        }).catch(() => {});
+      }
       setConfirmDeleteMemId(null);
       setFeedback({
         type: 'ok',
@@ -275,6 +368,58 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       });
     } finally {
       setBusyMemoryId(null);
+    }
+  };
+
+  const handleAddPublicMemory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser || savingPublicMemory) return;
+    if (!newPublicContent.trim()) {
+      setFeedback({ type: 'err', text: 'Isi pengingat umum tidak boleh kosong.' });
+      return;
+    }
+    setSavingPublicMemory(true);
+    setFeedback(null);
+    try {
+      await addPublicMemory({
+        adminUser: currentUser,
+        title: newPublicTitle.trim() || 'Pengingat Umum',
+        content: newPublicContent.trim(),
+      });
+      setNewPublicTitle('');
+      setNewPublicContent('');
+      setFeedback({
+        type: 'ok',
+        text: 'Pengingat umum disimpan dan langsung diketahui AI untuk semua pengguna.',
+      });
+    } catch (err) {
+      setFeedback({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Gagal menyimpan pengingat umum.',
+      });
+    } finally {
+      setSavingPublicMemory(false);
+    }
+  };
+
+  const handleDeletePublicMemory = async (mem: PublicMemoryDoc) => {
+    if (busyPublicMemId) return;
+    setBusyPublicMemId(mem.id);
+    setFeedback(null);
+    try {
+      await deletePublicMemory(mem.id);
+      setConfirmDeletePublicMemId(null);
+      setFeedback({
+        type: 'ok',
+        text: `Pengingat umum "${mem.title}" telah dihapus.`,
+      });
+    } catch (err) {
+      setFeedback({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Gagal menghapus pengingat umum.',
+      });
+    } finally {
+      setBusyPublicMemId(null);
     }
   };
 
@@ -334,60 +479,162 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <VerifiedBlueBadge size="xs" title="Admin Terverifikasi" />
           <span className="truncate text-zinc-600 dark:text-zinc-300">
             {adminLevel === 'primary' &&
-              'Akses penuh: semua level admin, kata pembuka Live, & pengingat pribadi.'}
+              'Akses penuh: FREEWILL, semua level admin, pengingat umum & pribadi.'}
             {adminLevel === 'admin_plus' &&
-              'Kelola User, Admin biasa, kata pembuka Live, & pengingat pribadi.'}
-            {adminLevel === 'admin' && 'Kelola akun User biasa (tidak bisa ubah sesama Admin).'}
+              'Kelola User, Admin biasa, pengingat umum, sapaan Live, & pengingat pribadi.'}
+            {adminLevel === 'admin' &&
+              'Kelola User biasa & Pengingat Umum (tidak bisa ubah sesama Admin).'}
           </span>
         </div>
       </div>
 
-      {/* Sub-navigation: Sapaan Live & Pengingat Pribadi ONLY visible for Admin+ and Admin Utama */}
-      {canAccessMemories ? (
-        <div className="grid grid-cols-3 gap-1.5 rounded-2xl bg-zinc-100 p-1.5 dark:bg-[#0B0F1A]">
-          <button
-            type="button"
-            onClick={() => setSubTab('users')}
-            className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-              subTab === 'users'
-                ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
-                : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
-            }`}
-          >
-            <Users className="h-3.5 w-3.5 text-[#0A36FF] dark:text-blue-400 shrink-0" />
-            <span>Pengguna ({filteredUsers.length})</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setSubTab('liveGreeting')}
-            className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-              subTab === 'liveGreeting'
-                ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
-                : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
-            }`}
-          >
-            <Mic className="h-3.5 w-3.5 text-[#0A36FF] dark:text-blue-400 shrink-0" />
-            <span>Sapaan Live</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setSubTab('memories')}
-            className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-              subTab === 'memories'
-                ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
-                : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
-            }`}
-          >
-            <BookOpen className="h-3.5 w-3.5 text-[#E51D2B] dark:text-[#FF4D5A] shrink-0" />
-            <span>Pengingat ({memories.length})</span>
-          </button>
-        </div>
-      ) : (
-        <div className="flex items-center gap-2 rounded-2xl bg-zinc-100 px-3.5 py-2.5 text-xs font-semibold text-zinc-900 dark:bg-[#0B0F1A] dark:text-white">
-          <Users className="h-3.5 w-3.5 text-[#0A36FF] dark:text-blue-400" />
-          <span>Daftar Pengguna ({filteredUsers.length})</span>
+      {/* FREEWILL Control (Hanya Admin Utama) */}
+      {adminLevel === 'primary' && (
+        <div
+          className={`space-y-2.5 rounded-2xl border p-3 transition-colors ${
+            freewillEnabled
+              ? 'border-amber-500/50 bg-gradient-to-r from-amber-50/90 via-red-50/60 to-blue-50/70 dark:border-amber-500/40 dark:from-amber-950/35 dark:via-red-950/25 dark:to-blue-950/30'
+              : 'border-zinc-200 dark:border-[#242C44] bg-zinc-50/80 dark:bg-[#0B0F1A]'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <div className="flex items-center gap-2">
+                <Zap
+                  className={`h-4 w-4 shrink-0 ${
+                    freewillEnabled
+                      ? 'text-amber-500 fill-amber-500'
+                      : 'text-zinc-500 dark:text-zinc-400'
+                  }`}
+                />
+                <span className="text-xs font-bold tracking-wide text-zinc-900 dark:text-white">
+                  FREEWILL
+                </span>
+                <span
+                  className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                    freewillEnabled
+                      ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                      : 'bg-zinc-200/80 text-zinc-600 dark:bg-white/10 dark:text-zinc-400'
+                  }`}
+                >
+                  {freewillEnabled ? 'AKTIF' : 'NONAKTIF'}
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-400">
+                Menjadikan semua user terdaftar &amp; tamu (yang belum daftar) mendapat efek sekelas Admin di AI (bahasa semi-gaul &amp; semua pengingat). Untuk yang belum daftar, menu Admin tetap tersembunyi.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={togglingFreewill}
+              onClick={handlePressFreewillButton}
+              className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-xl px-4 text-xs font-bold transition-all cursor-pointer disabled:opacity-50 ${
+                freewillEnabled
+                  ? 'bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] text-white shadow-sm hover:opacity-95'
+                  : 'border border-zinc-300 dark:border-[#2E3858] bg-white dark:bg-[#14192B] text-zinc-800 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-[#1C233B]'
+              }`}
+            >
+              <Zap className="h-3.5 w-3.5" />
+              <span>{togglingFreewill ? 'Menyimpan...' : freewillEnabled ? 'FREEWILL: ON' : 'FREEWILL: OFF'}</span>
+            </button>
+          </div>
+
+          {confirmFreewillOn && !freewillEnabled && (
+            <div className="rounded-xl border border-amber-500/50 bg-amber-50 dark:bg-amber-950/40 p-3 space-y-2.5">
+              <div className="flex items-start gap-2 text-xs text-amber-950 dark:text-amber-100">
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <div className="space-y-1">
+                  <p className="font-bold">Peringatan: Hidupkan Mode FREEWILL?</p>
+                  <p className="text-[11px] leading-relaxed text-amber-900/90 dark:text-amber-200/90">
+                    Semua pengguna terdaftar dan tamu yang belum daftar akan langsung mendapatkan efek level Admin (akses pengingat pribadi &amp; gaya bahasa semi-gaul AI). Lanjutkan mengaktifkan FREEWILL?
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={togglingFreewill}
+                  onClick={() => setConfirmFreewillOn(false)}
+                  className="inline-flex h-8 items-center rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-[#14192B] px-3 text-[11px] font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-[#1C233B] cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={togglingFreewill}
+                  onClick={() => void handleToggleFreewill(true)}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] px-3 text-[11px] font-bold text-white hover:opacity-95 disabled:opacity-50 cursor-pointer"
+                >
+                  <Zap className="h-3 w-3" />
+                  <span>{togglingFreewill ? 'Mengaktifkan...' : 'Ya, Hidupkan FREEWILL'}</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      {/* Sub-navigation: Semua Admin bisa akses Pengguna & Pengingat Umum; Admin+ & Admin Utama tambah Sapaan Live & Pengingat Pribadi */}
+      <div
+        className={`grid gap-1.5 rounded-2xl bg-zinc-100 p-1.5 dark:bg-[#0B0F1A] ${
+          canAccessMemories ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2'
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => setSubTab('users')}
+          className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+            subTab === 'users'
+              ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
+              : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+          }`}
+        >
+          <Users className="h-3.5 w-3.5 text-[#0A36FF] dark:text-blue-400 shrink-0" />
+          <span>Pengguna ({filteredUsers.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setSubTab('publicMemories')}
+          className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+            subTab === 'publicMemories'
+              ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
+              : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+          }`}
+        >
+          <Globe className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+          <span>Pengingat Umum ({publicMemories.length})</span>
+        </button>
+
+        {canAccessMemories && (
+          <>
+            <button
+              type="button"
+              onClick={() => setSubTab('liveGreeting')}
+              className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                subTab === 'liveGreeting'
+                  ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
+                  : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+              }`}
+            >
+              <Mic className="h-3.5 w-3.5 text-[#0A36FF] dark:text-blue-400 shrink-0" />
+              <span>Sapaan Live</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSubTab('memories')}
+              className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                subTab === 'memories'
+                  ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
+                  : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+              }`}
+            >
+              <BookOpen className="h-3.5 w-3.5 text-[#E51D2B] dark:text-[#FF4D5A] shrink-0" />
+              <span>Pengingat Pribadi ({memories.length})</span>
+            </button>
+          </>
+        )}
+      </div>
 
       {feedback && (
         <div
@@ -406,7 +653,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
-      {subTab === 'users' || !canAccessMemories ? (
+      {subTab === 'users' ? (
         <div className="space-y-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400" />
@@ -620,6 +867,106 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         )}
                       </div>
                     )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      ) : subTab === 'publicMemories' ? (
+        <div className="space-y-3">
+          <p className="rounded-xl border border-emerald-500/25 bg-emerald-50/70 dark:bg-emerald-950/25 px-3 py-2 text-[11px] leading-relaxed text-zinc-700 dark:text-zinc-300">
+            <strong>Pengingat Umum (Untuk Semua Pengguna):</strong> Semua informasi di sini akan
+            diketahui dan diingat oleh AI saat melayani siapa saja (User biasa, tamu belum daftar,
+            maupun semua Admin). Dapat dikelola oleh <strong>Admin ke atas</strong>.
+          </p>
+
+          <form
+            onSubmit={(e) => void handleAddPublicMemory(e)}
+            className="rounded-2xl border border-zinc-200 dark:border-[#242C44] bg-zinc-50/80 dark:bg-[#0B0F1A] p-3 space-y-2"
+          >
+            <input
+              type="text"
+              value={newPublicTitle}
+              onChange={(e) => setNewPublicTitle(e.target.value)}
+              maxLength={120}
+              placeholder="Judul singkat (misal: Promo Bulan Ini / Jam Operasional)"
+              className="h-9 w-full rounded-xl border border-zinc-200 dark:border-[#2A3350] bg-white dark:bg-[#111626] px-3 text-xs text-zinc-900 placeholder:text-zinc-400 dark:text-zinc-100 focus:outline-none focus:border-blue-500"
+            />
+            <textarea
+              value={newPublicContent}
+              onChange={(e) => setNewPublicContent(e.target.value)}
+              rows={2}
+              maxLength={2000}
+              placeholder="Tulis info atau pengingat umum untuk semua pelanggan Sinar Warna..."
+              className="w-full rounded-xl border border-zinc-200 dark:border-[#2A3350] bg-white dark:bg-[#111626] px-3 py-2 text-xs text-zinc-900 placeholder:text-zinc-400 dark:text-zinc-100 focus:outline-none focus:border-blue-500 resize-none"
+            />
+            <button
+              type="submit"
+              disabled={savingPublicMemory || !newPublicContent.trim()}
+              className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-[#0A36FF] px-3 text-xs font-semibold text-white hover:opacity-95 disabled:opacity-50 transition-opacity cursor-pointer"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>{savingPublicMemory ? 'Menyimpan...' : 'Tambah Pengingat Umum'}</span>
+            </button>
+          </form>
+
+          <div className={`space-y-2 overflow-y-auto ${compact ? 'max-h-[34dvh]' : 'max-h-[40dvh]'}`}>
+            {publicMemories.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-zinc-200 dark:border-[#242C44] p-4 text-center text-xs text-zinc-500">
+                Belum ada pengingat umum tambahan. Pengingat toko bawaan tetap aktif untuk semua pengguna.
+              </p>
+            ) : (
+              publicMemories.map((mem) => {
+                const isBusy = busyPublicMemId === mem.id;
+                const confirming = confirmDeletePublicMemId === mem.id;
+                return (
+                  <div
+                    key={mem.id}
+                    className="rounded-2xl border border-zinc-200/90 dark:border-[#242C44] bg-zinc-50/70 dark:bg-[#0B0F1A] p-3 space-y-1.5"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-zinc-900 dark:text-white">
+                          {mem.title}
+                        </p>
+                        <p className="mt-0.5 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
+                          {mem.content}
+                        </p>
+                      </div>
+
+                      {confirming ? (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => void handleDeletePublicMemory(mem)}
+                            className="h-7 rounded-lg bg-[#E51D2B] px-2 text-[11px] font-semibold text-white hover:bg-red-600 cursor-pointer"
+                          >
+                            Hapus
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => setConfirmDeletePublicMemId(null)}
+                            className="h-7 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2 text-[11px] text-zinc-600 dark:text-zinc-300 cursor-pointer"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => setConfirmDeletePublicMemId(mem.id)}
+                          title="Hapus pengingat umum"
+                          aria-label={`Hapus pengingat umum ${mem.title}`}
+                          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-red-500/15 hover:text-red-600 dark:hover:text-red-400 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })

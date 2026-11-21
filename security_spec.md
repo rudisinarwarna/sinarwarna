@@ -19,24 +19,27 @@
    - Blocked or deleted users (`users/{uid}.blocked == true || users/{uid}.deleted == true`) are denied creating or updating conversations/messages.
    - Regular users can only read/write their own `/conversations/{conversationId}` and `/conversations/{conversationId}/messages/{messageId}` documents.
    - Verified Admins may list/delete target user conversations and messages strictly for account deletion cleanup.
-5. **Public Live Config (`/appConfig/live`)**:
-   - Contains non-PII configuration (`greetingText`, `updatedBy` UID, timestamps).
-   - Readable via single-document `get` (`allow list: if false`) so AI Live sessions for any visitor/user receive the latest configured opening words.
-   - Writable (`create`, `update`) strictly by `isAdminPlus()` (`Admin+` and `Admin Utama`). Plain `Admin`, regular users, and unauthenticated clients receive `PERMISSION_DENIED`.
-6. **Strict Key, Bounds, & Timestamp Enforcement**:
+5. **Public Live & Freewill Config (`/appConfig/live`, `/appConfig/freewill`)**:
+   - `/appConfig/live` contains non-PII configuration (`greetingText`, `updatedBy` UID, timestamps), writable strictly by `isAdminPlus()`.
+   - `/appConfig/freewill` contains non-PII `enabled` boolean and `memoriesSummary` (cleared to `""` whenever disabled), writable strictly by `isPrimaryAdmin()` (`rudi.sinarwarna@gmail.com`).
+   - Both documents are readable via single-document `get` (`allow list: if false`) so the server and clients reflect active settings without exposing PII.
+6. **Public AI Memories (`/publicMemories/{memoryId}`)**:
+   - Non-PII general store/service memories (`isPublic == true`, no `createdByEmail`), readable via `get` and guarded `list` (`resource.data.isPublic == true`) so AI serves them for everyone.
+   - Writable (`create`, `update`, `delete`) by `Admin` tier and above (`isAdminOrFreewill()`).
+7. **Strict Key, Bounds, & Timestamp Enforcement**:
    - All writes validate `keys().hasAll(...)`, `keys().hasOnly(...)`, `affectedKeys().hasOnly(...)` on update, regex IDs (`^[a-zA-Z0-9_\-]+$`), bounded string lengths, and server timestamps (`request.time`).
    - Zero `get()` or `exists()` calls inside `allow list` rules.
 
 ## 2. The "Dirty Dozen" Payloads (Expected: PERMISSION_DENIED)
-1. **Unauthenticated read/write** to `/conversations/conv_1`, `/adminMemories/mem_1`, or write to `/appConfig/live`.
-2. **Unverified email user** (`email_verified == false`) attempting to create `/users/u1` or `/conversations/conv_1`.
+1. **Unauthenticated read/write** to `/conversations/conv_1`, `/adminMemories/mem_1`, `/publicMemories/pub_1` write, or `/appConfig/*` write.
+2. **Unverified email user** (`email_verified == false`) attempting to create `/users/u1`, `/conversations/conv_1`, or `/publicMemories/pub_1`.
 3. **Self-promotion attack**: Regular user or plain Admin creating/updating their own `role` to `"admin"` or `"admin_plus"`.
-4. **Plain Admin memory & Live greeting snooping/tampering**: Plain `Admin` attempting to read, list, create, or delete `/adminMemories`, or write `/appConfig/live`.
-5. **Plain Admin peer sabotage**: Plain `Admin` attempting to demote, block, or delete another `Admin` or `Admin+`.
+4. **Plain Admin memory & Live greeting snooping/tampering**: Plain `Admin` attempting to read, list, create, or delete `/adminMemories`, or write `/appConfig/live` or `/appConfig/freewill`.
+5. **Non-primary Admin FREEWILL tampering**: `Admin+` or plain `Admin` attempting to enable/disable `/appConfig/freewill`.
 6. **Admin+ privilege escalation**: `Admin+` attempting to promote a user to `admin_plus` or modify/delete another `Admin+`.
 7. **Primary admin sabotage**: Any admin attempting to block, demote, or delete `rudi.sinarwarna@gmail.com`.
-8. **Non-admin scraping PII**: Non-admin user listing `/users` or listing `/appConfig`.
-9. **Blocked user write**: User with `blocked: true` trying to create a new conversation or message.
-10. **Identity spoofing**: User A creating `/conversations/conv_1` with `userId: "user_B"` or updating `/appConfig/live` with someone else's `updatedBy`.
-11. **Shadow field injection**: Creating `/adminMemories/mem_1` or `/appConfig/live` with unapproved extra field `evil: true`.
-12. **Client-forged timestamp**: Creating/updating `/adminMemories/mem_1`, `/appConfig/live`, or `/users/{uid}` without `request.time`.
+8. **Non-admin scraping PII**: Non-admin user listing `/users` or `/appConfig` when Freewill is disabled.
+9. **Blocked user write**: User with `blocked: true` trying to create a new conversation, message, or public memory.
+10. **Identity spoofing**: User A creating `/conversations/conv_1` with `userId: "user_B"`, `/publicMemories/pub_1` with `createdBy: "user_B"`, or updating `/appConfig/live` with someone else's `updatedBy`.
+11. **Shadow field injection**: Creating `/adminMemories/mem_1`, `/publicMemories/pub_1`, or `/appConfig/live` with unapproved extra field `evil: true`.
+12. **Client-forged timestamp**: Creating/updating `/adminMemories/mem_1`, `/publicMemories/pub_1`, `/appConfig/*`, or `/users/{uid}` without `request.time`.

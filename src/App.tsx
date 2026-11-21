@@ -40,6 +40,7 @@ import {
 } from './firebase';
 import {
   seedDefaultAdminMemoriesOnce,
+  subscribeFreewillConfig,
   subscribeOwnUserAccess,
   type AdminLevel,
 } from './services/adminService';
@@ -64,6 +65,7 @@ import type {
 
 const STORAGE_KEY = 'sinar-warna-chats-v1';
 const THEME_KEY = 'sinar-warna-theme';
+const LIVE_TRANSCRIPT_KEY = 'sinar-warna-live-transcript';
 
 function loadInitialTheme(): boolean {
   try {
@@ -71,6 +73,14 @@ function loadInitialTheme(): boolean {
     if (saved === 'dark') return true;
     if (saved === 'light') return false;
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  } catch {
+    return true;
+  }
+}
+
+function loadInitialLiveTranscript(): boolean {
+  try {
+    return localStorage.getItem(LIVE_TRANSCRIPT_KEY) !== 'false';
   } catch {
     return true;
   }
@@ -148,10 +158,11 @@ export default function App() {
   const [cameraModalOpen, setCameraModalOpen] = useState<boolean>(false);
   const [liveModalOpen, setLiveModalOpen] = useState<boolean>(false);
   const [liveInitialCameraOn, setLiveInitialCameraOn] = useState<boolean>(false);
+  const [showLiveTranscript, setShowLiveTranscript] = useState<boolean>(loadInitialLiveTranscript);
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
   const [adminModalOpen, setAdminModalOpen] = useState<boolean>(false);
   const [adminLevel, setAdminLevel] = useState<AdminLevel>('none');
-  const isAdmin = adminLevel !== 'none';
+  const [freewillEnabled, setFreewillEnabled] = useState<boolean>(false);
   const [isVerifiedBadge, setIsVerifiedBadge] = useState<boolean>(false);
   const [showInstallBanner, setShowInstallBanner] = useState<boolean>(
     () => !isInstallPromptDismissed()
@@ -166,6 +177,19 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const isCloudUser = Boolean(user && isEmailVerified);
+
+  // When FREEWILL is active:
+  // - Logged-in verified users get Admin UI & permissions ('admin'), keeping Primary/Admin+ intact.
+  // - Unregistered / unverified guests keep 'none' UI (no Administrator menu/badge), while AI backend applies admin effects.
+  const effectiveAdminLevel: AdminLevel = !isCloudUser
+    ? 'none'
+    : adminLevel !== 'none'
+    ? adminLevel
+    : freewillEnabled
+    ? 'admin'
+    : 'none';
+  const isAdmin = effectiveAdminLevel !== 'none';
+  const effectiveVerifiedBadge = isCloudUser && (isAdmin || isVerifiedBadge);
 
   // Consume redirect result (for Google/Apple redirect flow outside iframes) & listen to Auth state
   useEffect(() => {
@@ -316,6 +340,14 @@ export default function App() {
     return () => unsubscribe();
   }, [authReady, isCloudUser, user, activeConversationId, cloudConversations]);
 
+  // Subscribe to global FREEWILL mode (non-PII doc in appConfig/freewill)
+  useEffect(() => {
+    const unsubscribe = subscribeFreewillConfig((enabled) => {
+      setFreewillEnabled(enabled);
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Sync dark class on <html>
   useEffect(() => {
     const root = document.documentElement;
@@ -330,6 +362,15 @@ export default function App() {
       // Ignore storage error
     }
   }, [isDark]);
+
+  // Persist Live Transcript Box preference
+  useEffect(() => {
+    try {
+      localStorage.setItem(LIVE_TRANSCRIPT_KEY, showLiveTranscript ? 'true' : 'false');
+    } catch {
+      // Ignore storage error
+    }
+  }, [showLiveTranscript]);
 
   // Persist local conversations when not using verified cloud sync
   useEffect(() => {
@@ -1036,7 +1077,7 @@ export default function App() {
         user={user}
         isCloudUser={isCloudUser}
         isAdmin={isAdmin}
-        isVerifiedBadge={isVerifiedBadge}
+        isVerifiedBadge={effectiveVerifiedBadge}
         authReady={authReady}
         authLoading={false}
         conversations={conversations}
@@ -1094,14 +1135,14 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {isCloudUser && (isAdmin || isVerifiedBadge) && user && (
+            {isCloudUser && (isAdmin || effectiveVerifiedBadge) && user && (
               <span
                 title={
-                  adminLevel === 'primary'
+                  effectiveAdminLevel === 'primary'
                     ? 'Admin Utama Terverifikasi'
-                    : adminLevel === 'admin_plus'
+                    : effectiveAdminLevel === 'admin_plus'
                     ? 'Admin+ Terverifikasi'
-                    : adminLevel === 'admin'
+                    : effectiveAdminLevel === 'admin'
                     ? 'Admin Terverifikasi'
                     : 'Akun Terverifikasi'
                 }
@@ -1275,6 +1316,7 @@ export default function App() {
       <LiveStudioModal
         isOpen={liveModalOpen}
         initialCameraOn={liveInitialCameraOn}
+        showTranscriptBox={showLiveTranscript}
         activeMode={activeMode}
         user={isCloudUser ? user : null}
         onClose={(transcriptLog) => {
@@ -1285,21 +1327,23 @@ export default function App() {
       <SettingsModal
         isOpen={settingsModalOpen}
         isDark={isDark}
+        showLiveTranscript={showLiveTranscript}
         isInstallable={isInstallable}
         isInstalled={isInstalled}
         isIOS={isIOS}
         isAdmin={isAdmin}
-        adminLevel={adminLevel}
+        adminLevel={effectiveAdminLevel}
         currentUser={user}
         onClose={() => setSettingsModalOpen(false)}
         onSetTheme={(dark) => setIsDark(dark)}
+        onSetShowLiveTranscript={(show) => setShowLiveTranscript(show)}
         onInstallAndroid={install}
       />
 
       <AdminModal
         isOpen={adminModalOpen && isAdmin}
         currentUser={user}
-        adminLevel={adminLevel}
+        adminLevel={effectiveAdminLevel}
         onClose={() => setAdminModalOpen(false)}
       />
 

@@ -26,6 +26,11 @@ export interface AdminMemoryRecord {
 
 export type AdminLevel = 'none' | 'admin' | 'admin_plus' | 'primary';
 
+export interface FreewillServerConfig {
+  enabled: boolean;
+  memoriesSummary: string;
+}
+
 export interface ServerAuthContext {
   authenticated: boolean;
   uid: string | null;
@@ -36,6 +41,8 @@ export interface ServerAuthContext {
   isPrimaryAdmin: boolean;
   isBlocked: boolean;
   adminMemories: AdminMemoryRecord[];
+  publicMemories: AdminMemoryRecord[];
+  freewill: FreewillServerConfig;
   seedMetaExists: boolean;
   idToken: string | null;
 }
@@ -197,6 +204,63 @@ export async function fetchAdminMemoriesServer(idToken: string): Promise<AdminMe
     .filter((m) => m.id && m.content);
 }
 
+export async function fetchPublicMemoriesServer(): Promise<AdminMemoryRecord[]> {
+  try {
+    const url = `${firestoreDocsBaseUrl()}:runQuery`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(2500),
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: 'publicMemories' }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: 'isPublic' },
+              op: 'EQUAL',
+              value: { booleanValue: true },
+            },
+          },
+          limit: 100,
+        },
+      }),
+    });
+    if (!res.ok) return [];
+    const rows = (await res.json()) as Array<{ document?: FirestoreRestDoc }>;
+    return rows
+      .map((row) => row.document)
+      .filter((d): d is FirestoreRestDoc => Boolean(d))
+      .map((d) => ({
+        id: d.fields?.id?.stringValue || getDocIdFromName(d.name),
+        title: d.fields?.title?.stringValue || 'Pengingat Umum',
+        content: d.fields?.content?.stringValue || '',
+      }))
+      .filter((m) => m.id && m.content);
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchFreewillConfigServer(): Promise<FreewillServerConfig> {
+  try {
+    const url = `${firestoreDocsBaseUrl()}/appConfig/freewill`;
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!res.ok) {
+      return { enabled: false, memoriesSummary: '' };
+    }
+    const doc = (await res.json().catch(() => null)) as FirestoreRestDoc | null;
+    const enabled = doc?.fields?.enabled?.booleanValue === true;
+    const memoriesSummary = enabled
+      ? (doc?.fields?.memoriesSummary?.stringValue || '').trim().slice(0, 10000)
+      : '';
+    return { enabled, memoriesSummary };
+  } catch {
+    return { enabled: false, memoriesSummary: '' };
+  }
+}
+
 export async function fetchLiveOpeningGreetingServer(): Promise<string> {
   try {
     const url = `${firestoreDocsBaseUrl()}/appConfig/live`;
@@ -215,6 +279,12 @@ export async function fetchLiveOpeningGreetingServer(): Promise<string> {
 export async function resolveServerAuthContext(
   idToken: string | null | undefined
 ): Promise<ServerAuthContext> {
+  const [publicMemories, freewill, claims] = await Promise.all([
+    fetchPublicMemoriesServer().catch(() => []),
+    fetchFreewillConfigServer().catch(() => ({ enabled: false, memoriesSummary: '' })),
+    idToken ? verifyFirebaseIdToken(idToken) : Promise.resolve(null),
+  ]);
+
   const empty: ServerAuthContext = {
     authenticated: false,
     uid: null,
@@ -225,13 +295,13 @@ export async function resolveServerAuthContext(
     isPrimaryAdmin: false,
     isBlocked: false,
     adminMemories: [],
+    publicMemories,
+    freewill,
     seedMetaExists: false,
     idToken: null,
   };
 
-  if (!idToken) return empty;
-  const claims = await verifyFirebaseIdToken(idToken);
-  if (!claims) return empty;
+  if (!idToken || !claims) return empty;
 
   const isPrimaryAdmin =
     claims.emailVerified && claims.email === PRIMARY_ADMIN_EMAIL.toLowerCase();
@@ -307,6 +377,8 @@ export async function resolveServerAuthContext(
     isPrimaryAdmin,
     isBlocked,
     adminMemories,
+    publicMemories,
+    freewill,
     seedMetaExists,
     idToken,
   };
@@ -420,5 +492,111 @@ export async function deleteAdminMemoriesByKeywordServer(params: {
     ok: deletedTitles.length > 0,
     deletedTitles,
     error: deletedTitles.length === 0 ? 'Gagal menghapus dokumen pengingat di database.' : undefined,
+  };
+}
+
+export async function savePublicMemoryServer(params: {
+  idToken: string;
+  uid: string;
+  title: string;
+  content: string;
+}): Promise<{ ok: boolean; memory?: AdminMemoryRecord; error?: string }> {
+  const memId = sanitizeFirestoreId(`pub_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+  const title = (params.title || 'Pengingat Umum').trim().slice(0, 120) || 'Pengingat Umum';
+  const content = (params.content || '').trim().slice(0, 2000);
+  if (!content) {
+    return { ok: false, error: 'Isi pengingat umum tidak boleh kosong.' };
+  }
+
+  const docName = `projects/${FIREBASE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents/publicMemories/${memId}`;
+  const url = `${firestoreDocsBaseUrl()}:commit`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${params.idToken}`,
+    },
+    body: JSON.stringify({
+      writes: [
+        {
+          update: {
+            name: docName,
+            fields: {
+              id: { stringValue: memId },
+              title: { stringValue: title },
+              content: { stringValue: content },
+              isPublic: { booleanValue: true },
+              createdBy: { stringValue: params.uid.slice(0, 128) },
+            },
+          },
+          currentDocument: { exists: false },
+          updateTransforms: [
+            { fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' },
+            { fieldPath: 'updatedAt', setToServerValue: 'REQUEST_TIME' },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    return { ok: false, error: `Gagal menyimpan pengingat umum (${res.status}): ${errText}` };
+  }
+
+  return {
+    ok: true,
+    memory: { id: memId, title, content },
+  };
+}
+
+export async function deletePublicMemoriesByKeywordServer(params: {
+  idToken: string;
+  keyword: string;
+}): Promise<{ ok: boolean; deletedTitles: string[]; error?: string }> {
+  const rawKeyword = (params.keyword || '').trim().toLowerCase();
+  if (!rawKeyword) {
+    return { ok: false, deletedTitles: [], error: 'Kata kunci pengingat umum wajib diisi.' };
+  }
+
+  const all = await fetchPublicMemoriesServer();
+  const terms = rawKeyword
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2);
+
+  const matches = all.filter((m) => {
+    const hay = `${m.id} ${m.title} ${m.content}`.toLowerCase();
+    if (hay.includes(rawKeyword)) return true;
+    if (terms.length > 0 && terms.every((t) => hay.includes(t))) return true;
+    return false;
+  });
+
+  if (matches.length === 0) {
+    return {
+      ok: false,
+      deletedTitles: [],
+      error: `Tidak ditemukan pengingat umum yang cocok dengan "${params.keyword}".`,
+    };
+  }
+
+  const deletedTitles: string[] = [];
+  for (const m of matches) {
+    const delUrl = `${firestoreDocsBaseUrl()}/publicMemories/${encodeURIComponent(m.id)}`;
+    const res = await fetch(delUrl, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${params.idToken}` },
+    });
+    if (res.ok) {
+      deletedTitles.push(m.title);
+    }
+  }
+
+  return {
+    ok: deletedTitles.length > 0,
+    deletedTitles,
+    error:
+      deletedTitles.length === 0 ? 'Gagal menghapus dokumen pengingat umum di database.' : undefined,
   };
 }

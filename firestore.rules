@@ -47,12 +47,26 @@ service cloud.firestore {
       );
     }
 
+    function isFreewillActive() {
+      return exists(/databases/$(database)/documents/appConfig/freewill) &&
+        get(/databases/$(database)/documents/appConfig/freewill).data.enabled == true;
+    }
+
     function isAnyAdmin() {
       return isPrimaryAdmin() || (
         isSignedIn() &&
         isVerified() &&
         isNotBlocked() &&
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isAdminOrFreewill() {
+      return isAnyAdmin() || (
+        isSignedIn() &&
+        isVerified() &&
+        isNotBlocked() &&
+        isFreewillActive()
       );
     }
 
@@ -96,7 +110,7 @@ service cloud.firestore {
       return !targetIsPrimaryAdmin(userId) && (
         (isPrimaryAdmin() && nextRole in ['user', 'admin', 'admin_plus']) ||
         (isAdminPlus() && !isPrimaryAdmin() && targetAdminLevel(userId) in ['user', 'admin'] && nextRole in ['user', 'admin']) ||
-        (isAnyAdmin() && !isAdminPlus() && targetAdminLevel(userId) == 'user' && nextRole in ['user', 'admin'])
+        (isAdminOrFreewill() && !isAdminPlus() && targetAdminLevel(userId) == 'user' && nextRole in ['user', 'admin'])
       );
     }
 
@@ -104,7 +118,7 @@ service cloud.firestore {
       return !targetIsPrimaryAdmin(userId) && (
         isPrimaryAdmin() ||
         (isAdminPlus() && !isPrimaryAdmin() && targetAdminLevel(userId) in ['user', 'admin']) ||
-        (isAnyAdmin() && !isAdminPlus() && targetAdminLevel(userId) == 'user')
+        (isAdminOrFreewill() && !isAdminPlus() && targetAdminLevel(userId) == 'user')
       );
     }
 
@@ -195,6 +209,39 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidFreewillSettings(data) {
+      return data.keys().hasAll(['enabled', 'memoriesSummary', 'updatedBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['enabled', 'memoriesSummary', 'updatedBy', 'createdAt', 'updatedAt']) &&
+        data.enabled is bool &&
+        data.memoriesSummary is string &&
+        data.memoriesSummary.size() <= 10000 &&
+        data.updatedBy is string &&
+        data.updatedBy.size() >= 1 &&
+        data.updatedBy.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPublicMemory(data, memoryId) {
+      return data.keys().hasAll(['id', 'title', 'content', 'isPublic', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'title', 'content', 'isPublic', 'createdBy', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.id == memoryId &&
+        data.title is string &&
+        data.title.size() >= 1 &&
+        data.title.size() <= 120 &&
+        data.content is string &&
+        data.content.size() >= 1 &&
+        data.content.size() <= 2000 &&
+        data.isPublic is bool &&
+        data.isPublic == true &&
+        data.createdBy is string &&
+        data.createdBy.size() >= 1 &&
+        data.createdBy.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     function isValidConversation(data, conversationId) {
       return data.keys().hasAll(['id', 'userId', 'title', 'mode', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly(['id', 'userId', 'title', 'mode', 'createdAt', 'updatedAt']) &&
@@ -237,8 +284,8 @@ service cloud.firestore {
 
     // Users Collection
     match /users/{userId} {
-      allow get: if isValidId(userId) && (isOwner(userId) || isAnyAdmin());
-      allow list: if isAnyAdmin();
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdminOrFreewill());
+      allow list: if isAdminOrFreewill();
       allow create: if isOwner(userId) &&
         isValidId(userId) &&
         incoming().uid == request.auth.uid &&
@@ -282,8 +329,8 @@ service cloud.firestore {
 
     // Admin Grants Collection
     match /admins/{userId} {
-      allow get: if isValidId(userId) && (isOwner(userId) || isAnyAdmin());
-      allow list: if isAnyAdmin();
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdminOrFreewill());
+      allow list: if isAdminOrFreewill();
       allow create: if isValidId(userId) &&
         isValidAdminGrant(incoming(), userId) &&
         incoming().createdAt == request.time &&
@@ -292,7 +339,7 @@ service cloud.firestore {
           (isPrimaryAdmin() && request.auth.uid == userId && (!('level' in incoming()) || incoming().level == 'admin_plus')) ||
           (isPrimaryAdmin() && !targetIsPrimaryAdmin(userId)) ||
           (isAdminPlus() && !isPrimaryAdmin() && request.auth.uid != userId && targetAdminLevel(userId) in ['user', 'admin'] && (!('level' in incoming()) || incoming().level == 'admin')) ||
-          (isAnyAdmin() && !isAdminPlus() && request.auth.uid != userId && targetAdminLevel(userId) == 'user' && (!('level' in incoming()) || incoming().level == 'admin'))
+          (isAdminOrFreewill() && !isAdminPlus() && request.auth.uid != userId && targetAdminLevel(userId) == 'user' && (!('level' in incoming()) || incoming().level == 'admin'))
         );
       allow update: if isValidId(userId) &&
         isValidAdminGrant(incoming(), userId) &&
@@ -351,25 +398,69 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // AI Live Opening Greeting Config (readable on single 'live' doc without PII; writable exclusively by Admin+ & Primary Admin)
-    match /appConfig/{docId} {
-      allow get: if isValidId(docId) && docId == 'live';
-      allow list: if false;
-      allow create: if isAdminPlus() &&
-        isValidId(docId) &&
-        docId == 'live' &&
-        isValidLiveSettings(incoming()) &&
-        incoming().updatedBy == request.auth.uid &&
+    // Public AI Memories (non-PII, read by all for AI context; managed by Admin tier & above)
+    match /publicMemories/{memoryId} {
+      allow get: if isValidId(memoryId) && existing().isPublic == true;
+      allow list: if resource.data.isPublic == true;
+      allow create: if isAdminOrFreewill() &&
+        isValidId(memoryId) &&
+        isValidPublicMemory(incoming(), memoryId) &&
+        incoming().createdBy == request.auth.uid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isAdminPlus() &&
-        isValidId(docId) &&
-        docId == 'live' &&
-        isValidLiveSettings(incoming()) &&
-        incoming().updatedBy == request.auth.uid &&
+      allow update: if isAdminOrFreewill() &&
+        isValidId(memoryId) &&
+        isValidPublicMemory(incoming(), memoryId) &&
+        incoming().id == existing().id &&
+        incoming().createdBy == existing().createdBy &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['greetingText', 'updatedBy', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'content', 'updatedAt']);
+      allow delete: if isAdminOrFreewill() && isValidId(memoryId);
+    }
+
+    // App Config ('live' writable by Admin+ & Primary Admin; 'freewill' writable exclusively by Primary Admin)
+    match /appConfig/{docId} {
+      allow get: if isValidId(docId) && docId in ['live', 'freewill'];
+      allow list: if false;
+      allow create: if isValidId(docId) && (
+        (
+          docId == 'live' &&
+          isAdminPlus() &&
+          isValidLiveSettings(incoming()) &&
+          incoming().updatedBy == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time
+        ) ||
+        (
+          docId == 'freewill' &&
+          isPrimaryAdmin() &&
+          isValidFreewillSettings(incoming()) &&
+          incoming().updatedBy == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time
+        )
+      );
+      allow update: if isValidId(docId) && (
+        (
+          docId == 'live' &&
+          isAdminPlus() &&
+          isValidLiveSettings(incoming()) &&
+          incoming().updatedBy == request.auth.uid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['greetingText', 'updatedBy', 'updatedAt'])
+        ) ||
+        (
+          docId == 'freewill' &&
+          isPrimaryAdmin() &&
+          isValidFreewillSettings(incoming()) &&
+          incoming().updatedBy == request.auth.uid &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['enabled', 'memoriesSummary', 'updatedBy', 'updatedAt'])
+        )
+      );
       allow delete: if false;
     }
 
@@ -378,10 +469,10 @@ service cloud.firestore {
       allow get: if isSignedIn() &&
         isVerified() &&
         isValidId(conversationId) &&
-        (existing().userId == request.auth.uid || isAnyAdmin());
+        (existing().userId == request.auth.uid || isAdminOrFreewill());
       allow list: if isSignedIn() &&
         isVerified() &&
-        (resource.data.userId == request.auth.uid || isAnyAdmin());
+        (resource.data.userId == request.auth.uid || isAdminOrFreewill());
       allow create: if isSignedIn() &&
         isVerified() &&
         isNotBlocked() &&
@@ -408,7 +499,7 @@ service cloud.firestore {
       allow delete: if isSignedIn() &&
         isVerified() &&
         isValidId(conversationId) &&
-        (existing().userId == request.auth.uid || isAnyAdmin());
+        (existing().userId == request.auth.uid || isAdminOrFreewill());
 
       // Messages Subcollection
       match /messages/{messageId} {
@@ -416,10 +507,10 @@ service cloud.firestore {
           isVerified() &&
           isValidId(conversationId) &&
           isValidId(messageId) &&
-          ((existing().userId == request.auth.uid && isParentConversationOwner(conversationId)) || isAnyAdmin());
+          ((existing().userId == request.auth.uid && isParentConversationOwner(conversationId)) || isAdminOrFreewill());
         allow list: if isSignedIn() &&
           isVerified() &&
-          (resource.data.userId == request.auth.uid || isAnyAdmin());
+          (resource.data.userId == request.auth.uid || isAdminOrFreewill());
         allow create: if isSignedIn() &&
           isVerified() &&
           isNotBlocked() &&
@@ -450,7 +541,7 @@ service cloud.firestore {
           isVerified() &&
           isValidId(conversationId) &&
           isValidId(messageId) &&
-          ((existing().userId == request.auth.uid && isParentConversationOwner(conversationId)) || isAnyAdmin());
+          ((existing().userId == request.auth.uid && isParentConversationOwner(conversationId)) || isAdminOrFreewill());
       }
     }
   }

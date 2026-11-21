@@ -1,7 +1,9 @@
 import { type Content, type FunctionCall, type GoogleGenAI, type Part } from '@google/genai';
 import {
   deleteAdminMemoriesByKeywordServer,
+  deletePublicMemoriesByKeywordServer,
   saveAdminMemoryServer,
+  savePublicMemoryServer,
   type ServerAuthContext,
 } from './firebaseServerAuth.ts';
 import {
@@ -60,23 +62,52 @@ export async function runChatStreamWithTools(params: {
 }): Promise<void> {
   const { ai, mode, thinkingDepth, authContext, abortSignal, onEvent } = params;
 
-  const effectiveMemories = authContext.canAccessAdminMemories
+  const useSemiGaul = authContext.isAdmin || authContext.freewill.enabled;
+  const includePrivateMemories =
+    authContext.canAccessAdminMemories || authContext.freewill.enabled;
+  const canManageAdminMemories = Boolean(
+    authContext.canAccessAdminMemories && authContext.idToken && authContext.uid
+  );
+  const canManagePublicMemories = Boolean(
+    (authContext.isAdmin || authContext.freewill.enabled) &&
+      authContext.authenticated &&
+      authContext.idToken &&
+      authContext.uid
+  );
+
+  const effectiveAdminMemories = authContext.canAccessAdminMemories
     ? authContext.adminMemories.length > 0 || authContext.seedMetaExists
       ? [...authContext.adminMemories]
       : [...DEFAULT_ADMIN_PRIVATE_MEMORIES]
+    : authContext.freewill.enabled && !authContext.freewill.memoriesSummary
+    ? [...DEFAULT_ADMIN_PRIVATE_MEMORIES]
     : [];
+
+  const effectivePublicMemories = [...authContext.publicMemories];
 
   let workingContents: Content[] = [...params.contents];
   const attempts = getChatAttempts(thinkingDepth);
-  const tools = getChatToolsForUser(authContext.canAccessAdminMemories);
+  const tools = getChatToolsForUser({
+    canManageAdminMemories,
+    canManagePublicMemories,
+  });
 
   for (let turn = 0; turn < 3; turn++) {
     if (abortSignal.aborted) break;
 
     const systemInstruction = buildChatSystemInstruction({
       mode,
-      isAdmin: authContext.canAccessAdminMemories,
-      adminMemories: effectiveMemories,
+      useSemiGaul,
+      includePrivateMemories,
+      adminMemories: effectiveAdminMemories,
+      privateMemoriesSummary: authContext.canAccessAdminMemories
+        ? undefined
+        : authContext.freewill.enabled
+        ? authContext.freewill.memoriesSummary
+        : undefined,
+      publicMemories: effectivePublicMemories,
+      canManageAdminMemories,
+      canManagePublicMemories,
     });
 
     let activeIterator: AsyncIterator<
@@ -149,7 +180,12 @@ export async function runChatStreamWithTools(params: {
       current = await activeIterator.next();
     }
 
-    if (functionCalls.length === 0 || !authContext.isAdmin || !authContext.idToken || !authContext.uid) {
+    if (
+      functionCalls.length === 0 ||
+      (!canManageAdminMemories && !canManagePublicMemories) ||
+      !authContext.idToken ||
+      !authContext.uid
+    ) {
       break;
     }
 
@@ -158,7 +194,7 @@ export async function runChatStreamWithTools(params: {
       const name = fc.name || '';
       const args = (fc.args || {}) as Record<string, unknown>;
 
-      if (name === 'save_admin_memory') {
+      if (name === 'save_admin_memory' && canManageAdminMemories) {
         const title = String(args.title || 'Pengingat Pribadi').trim();
         const content = String(args.content || '').trim();
         const saved = await saveAdminMemoryServer({
@@ -169,7 +205,7 @@ export async function runChatStreamWithTools(params: {
           content,
         });
         if (saved.ok && saved.memory) {
-          effectiveMemories.push(saved.memory);
+          effectiveAdminMemories.push(saved.memory);
           await onEvent({
             memoryAction: { type: 'saved', detail: saved.memory.title },
           });
@@ -183,7 +219,7 @@ export async function runChatStreamWithTools(params: {
               : { ok: false, error: saved.error },
           },
         });
-      } else if (name === 'delete_admin_memory') {
+      } else if (name === 'delete_admin_memory' && canManageAdminMemories) {
         const keyword = String(args.keyword || '').trim();
         const deleted = await deleteAdminMemoriesByKeywordServer({
           idToken: authContext.idToken,
@@ -191,9 +227,59 @@ export async function runChatStreamWithTools(params: {
         });
         if (deleted.ok && deleted.deletedTitles.length > 0) {
           const lowerDeleted = deleted.deletedTitles.map((t) => t.toLowerCase());
-          for (let i = effectiveMemories.length - 1; i >= 0; i--) {
-            if (lowerDeleted.includes(effectiveMemories[i].title.toLowerCase())) {
-              effectiveMemories.splice(i, 1);
+          for (let i = effectiveAdminMemories.length - 1; i >= 0; i--) {
+            if (lowerDeleted.includes(effectiveAdminMemories[i].title.toLowerCase())) {
+              effectiveAdminMemories.splice(i, 1);
+            }
+          }
+          await onEvent({
+            memoryAction: { type: 'deleted', detail: deleted.deletedTitles.join(', ') },
+          });
+        }
+        responseParts.push({
+          functionResponse: {
+            name,
+            ...(fc.id ? { id: fc.id } : {}),
+            response: deleted.ok
+              ? { ok: true, deletedTitles: deleted.deletedTitles }
+              : { ok: false, error: deleted.error },
+          },
+        });
+      } else if (name === 'save_public_memory' && canManagePublicMemories) {
+        const title = String(args.title || 'Pengingat Umum').trim();
+        const content = String(args.content || '').trim();
+        const saved = await savePublicMemoryServer({
+          idToken: authContext.idToken,
+          uid: authContext.uid,
+          title,
+          content,
+        });
+        if (saved.ok && saved.memory) {
+          effectivePublicMemories.push(saved.memory);
+          await onEvent({
+            memoryAction: { type: 'saved', detail: saved.memory.title },
+          });
+        }
+        responseParts.push({
+          functionResponse: {
+            name,
+            ...(fc.id ? { id: fc.id } : {}),
+            response: saved.ok
+              ? { ok: true, id: saved.memory?.id, title: saved.memory?.title }
+              : { ok: false, error: saved.error },
+          },
+        });
+      } else if (name === 'delete_public_memory' && canManagePublicMemories) {
+        const keyword = String(args.keyword || '').trim();
+        const deleted = await deletePublicMemoriesByKeywordServer({
+          idToken: authContext.idToken,
+          keyword,
+        });
+        if (deleted.ok && deleted.deletedTitles.length > 0) {
+          const lowerDeleted = deleted.deletedTitles.map((t) => t.toLowerCase());
+          for (let i = effectivePublicMemories.length - 1; i >= 0; i--) {
+            if (lowerDeleted.includes(effectivePublicMemories[i].title.toLowerCase())) {
+              effectivePublicMemories.splice(i, 1);
             }
           }
           await onEvent({

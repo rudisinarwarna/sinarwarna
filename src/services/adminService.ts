@@ -551,3 +551,152 @@ export async function saveLiveOpeningGreeting(
   }
 }
 
+export interface PublicMemoryDoc {
+  id: string;
+  title: string;
+  content: string;
+  isPublic: boolean;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export function subscribePublicMemories(
+  onData: (memories: PublicMemoryDoc[]) => void,
+  onError: (err: Error) => void
+): Unsubscribe {
+  const path = 'publicMemories';
+  const q = query(collection(db, path), where('isPublic', '==', true));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list: PublicMemoryDoc[] = snapshot.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: String(data.id || d.id),
+          title: String(data.title || 'Pengingat Umum'),
+          content: String(data.content || ''),
+          isPublic: data.isPublic === true,
+          createdBy: String(data.createdBy || ''),
+          createdAt: toMillis(data.createdAt),
+          updatedAt: toMillis(data.updatedAt),
+        };
+      });
+      list.sort((a, b) => b.createdAt - a.createdAt);
+      onData(list);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        onError(wrapped instanceof Error ? wrapped : new Error(String(wrapped)));
+      }
+    }
+  );
+}
+
+export async function addPublicMemory(params: {
+  adminUser: User;
+  title: string;
+  content: string;
+}): Promise<void> {
+  const cleanTitle = params.title.trim().slice(0, 120) || 'Pengingat Umum';
+  const cleanContent = params.content.trim().slice(0, 2000);
+  if (!cleanContent) {
+    throw new Error('Isi pengingat umum tidak boleh kosong.');
+  }
+  const memId = sanitizeId(`pub_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+  const path = `publicMemories/${memId}`;
+  try {
+    await setDoc(doc(db, 'publicMemories', memId), {
+      id: memId,
+      title: cleanTitle,
+      content: cleanContent,
+      isPublic: true,
+      createdBy: sanitizeId(params.adminUser.uid),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function deletePublicMemory(memoryId: string): Promise<void> {
+  const safeId = sanitizeId(memoryId);
+  const path = `publicMemories/${safeId}`;
+  try {
+    await deleteDoc(doc(db, 'publicMemories', safeId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function subscribeFreewillConfig(
+  onData: (enabled: boolean) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  const path = 'appConfig/freewill';
+  return onSnapshot(
+    doc(db, 'appConfig', 'freewill'),
+    (snap) => {
+      if (!snap.exists()) {
+        onData(false);
+        return;
+      }
+      onData(snap.data()?.enabled === true);
+    },
+    (error) => {
+      if (!onError) return;
+      try {
+        handleFirestoreError(error, OperationType.GET, path);
+      } catch (wrapped) {
+        onError(wrapped instanceof Error ? wrapped : new Error(String(wrapped)));
+      }
+    }
+  );
+}
+
+export function formatMemoriesSummaryForFreewill(
+  memories: Array<{ title: string; content: string }>
+): string {
+  const source = memories.length > 0 ? memories : DEFAULT_ADMIN_PRIVATE_MEMORIES;
+  return source
+    .map((m, idx) => `${idx + 1}. [${m.title}] ${m.content}`)
+    .join('\n')
+    .slice(0, 10000);
+}
+
+export async function setFreewillMode(params: {
+  primaryAdminUser: User;
+  enabled: boolean;
+  memories?: Array<{ title: string; content: string }>;
+}): Promise<void> {
+  const path = 'appConfig/freewill';
+  const ref = doc(db, 'appConfig', 'freewill');
+  const memoriesSummary = params.enabled
+    ? formatMemoriesSummaryForFreewill(params.memories || [])
+    : '';
+  try {
+    const existingSnap = await getDoc(ref);
+    if (existingSnap.exists()) {
+      await updateDoc(ref, {
+        enabled: params.enabled,
+        memoriesSummary,
+        updatedBy: sanitizeId(params.primaryAdminUser.uid),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await setDoc(ref, {
+        enabled: params.enabled,
+        memoriesSummary,
+        updatedBy: sanitizeId(params.primaryAdminUser.uid),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+

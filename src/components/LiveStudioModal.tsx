@@ -19,6 +19,7 @@ import { SinarLogo } from './SinarLogo';
 interface LiveStudioModalProps {
   isOpen: boolean;
   initialCameraOn?: boolean;
+  showTranscriptBox?: boolean;
   activeMode: CreativeModeId;
   user: User | null;
   onClose: (transcriptLog?: Array<{ role: 'user' | 'model'; text: string }>) => void;
@@ -104,6 +105,7 @@ function decodeBase64Pcm24kToFloat32(base64: string): Float32Array<ArrayBuffer> 
 export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   isOpen,
   initialCameraOn = false,
+  showTranscriptBox = true,
   activeMode,
   user,
   onClose,
@@ -339,7 +341,20 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
       const buffer = buffers[clipIndex % buffers.length];
       const source = outCtx.createBufferSource();
       source.buffer = buffer;
-      source.connect(outCtx.destination);
+
+      const gainNode = outCtx.createGain();
+      gainNode.gain.value = 1.75;
+
+      const compressor = outCtx.createDynamicsCompressor();
+      compressor.threshold.value = -12;
+      compressor.knee.value = 10;
+      compressor.ratio.value = 8;
+      compressor.attack.value = 0.002;
+      compressor.release.value = 0.08;
+
+      source.connect(gainNode);
+      gainNode.connect(compressor);
+      compressor.connect(outCtx.destination);
 
       const now = outCtx.currentTime;
       const startAt = Math.max(now, nextStartTimeRef.current);
@@ -361,6 +376,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
 
     try {
       const audioEl = new Audio(OWIE_BARK_CLIPS[clipIndex]);
+      audioEl.volume = 1;
       setStatus('speaking');
       audioEl.onended = () => {
         if (!isPausedRef.current) {
@@ -854,16 +870,18 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
                 {status === 'listening' && `Terhubung dengan ${activeVoiceLabel} · Silakan berbicara...`}
                 {status === 'speaking' &&
                   (voice === 'owie'
-                    ? 'Owie sedang menggonggong (baca teks di bawah)'
+                    ? showTranscriptBox
+                      ? 'Owie sedang menggonggong (baca teks di bawah)'
+                      : 'Owie sedang menggonggong'
                     : `${activeVoiceLabel} sedang berbicara`)}
                 {status === 'paused' && 'Sesi Live dijeda'}
                 {status === 'error' && 'Koneksi terputus'}
               </p>
-              <p className="text-xs text-zinc-400 max-w-xs mx-auto">
-                {isMuted
-                  ? 'Mikrofon dibisukan · Ketuk ikon mikrofon untuk berbicara'
-                  : 'Anda bisa minta memanggil Santi, Cynthia, Awen, Cyndi, atau Owie kapan saja'}
-              </p>
+              {isMuted && (
+                <p className="text-xs text-zinc-400 max-w-xs mx-auto">
+                  Mikrofon dibisukan · Ketuk ikon mikrofon untuk berbicara
+                </p>
+              )}
             </div>
           </div>
         ) : (
@@ -873,15 +891,17 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
               {status === 'listening' && `Kamera aktif (${activeVoiceLabel}) · Silakan berbicara`}
               {status === 'speaking' &&
                 (voice === 'owie'
-                  ? 'Owie sedang menggonggong (baca teks di bawah)'
+                  ? showTranscriptBox
+                    ? 'Owie sedang menggonggong (baca teks di bawah)'
+                    : 'Owie sedang menggonggong'
                   : `${activeVoiceLabel} sedang berbicara...`)}
               {status === 'paused' && 'Sesi Live dijeda'}
             </p>
           </div>
         )}
 
-        {/* Real-time Live Transcripts (shows readable Indonesian translations for Owie's barks!) */}
-        {transcripts.length > 0 && (
+        {/* Real-time Live Transcripts (togglable in Pengaturan) */}
+        {showTranscriptBox && transcripts.length > 0 && (
           <div className="mt-2 w-full max-w-xl max-h-28 sm:max-h-32 overflow-y-auto rounded-2xl border border-white/15 bg-black/55 px-4 py-2.5 text-xs space-y-1.5 backdrop-blur-md">
             {transcripts.slice(-6).map((item) => (
               <p key={item.id} className="leading-relaxed text-zinc-100">

@@ -5,8 +5,10 @@ import {
 } from '@google/genai';
 import {
   deleteAdminMemoriesByKeywordServer,
+  deletePublicMemoriesByKeywordServer,
   fetchLiveOpeningGreetingServer,
   saveAdminMemoryServer,
+  savePublicMemoryServer,
   type ServerAuthContext,
 } from './firebaseServerAuth.ts';
 import {
@@ -45,12 +47,26 @@ export function createLiveBridge(params: {
   const { ai, mode, authContext, sendJson, closeClient, onDone } = params;
 
   let currentVoice: CanonicalVoiceId = normalizePersonaId(params.initialVoice);
-  const canUseAdminMemories = authContext.canAccessAdminMemories;
-  const adminMemories = canUseAdminMemories
+  const useSemiGaul = authContext.isAdmin || authContext.freewill.enabled;
+  const includePrivateMemories =
+    authContext.canAccessAdminMemories || authContext.freewill.enabled;
+  const canUseAdminMemories = Boolean(
+    authContext.canAccessAdminMemories && authContext.idToken && authContext.uid
+  );
+  const canManagePublicMemories = Boolean(
+    (authContext.isAdmin || authContext.freewill.enabled) &&
+      authContext.authenticated &&
+      authContext.idToken &&
+      authContext.uid
+  );
+  const adminMemories = authContext.canAccessAdminMemories
     ? authContext.adminMemories.length > 0 || authContext.seedMetaExists
       ? [...authContext.adminMemories]
       : [...DEFAULT_ADMIN_PRIVATE_MEMORIES]
+    : authContext.freewill.enabled && !authContext.freewill.memoriesSummary
+    ? [...DEFAULT_ADMIN_PRIVATE_MEMORIES]
     : [];
+  const publicMemories = [...authContext.publicMemories];
 
   let activeSession: LiveSession | null = null;
   let closedByClient = false;
@@ -152,8 +168,17 @@ export function createLiveBridge(params: {
 
     const { voiceName, liveSystemInstruction, greetingPrompt, tools } =
       buildLivePersonaSessionConfig(targetVoice, mode, {
-        isAdmin: canUseAdminMemories,
+        useSemiGaul,
+        includePrivateMemories,
         adminMemories,
+        privateMemoriesSummary: authContext.canAccessAdminMemories
+          ? undefined
+          : authContext.freewill.enabled
+          ? authContext.freewill.memoriesSummary
+          : undefined,
+        publicMemories,
+        canManageAdminMemories: canUseAdminMemories,
+        canManagePublicMemories,
         handoffFrom,
         recentContext: recentTurns.join(' | '),
         customOpeningGreeting: !handoffFrom ? customOpeningGreeting : undefined,
@@ -226,6 +251,8 @@ export function createLiveBridge(params: {
                         instruction:
                           currentVoice === 'owie'
                             ? `Panggil owie_caption bahwa Owie akan memanggilkan ${PERSONA_DISPLAY_NAMES[requested]}, lalu akhiri giliranmu singkat.`
+                            : useSemiGaul
+                            ? `Ucapkan sekarang dengan gaya semi-gaul lu/gua menggunakan suaramu sendiri bahwa kamu mau memanggilkan ${PERSONA_DISPLAY_NAMES[requested]} (misalnya: "Oke tunggu bentar ya, gua panggilin ${PERSONA_DISPLAY_NAMES[requested]} dulu nih!").`
                             : `Ucapkan sekarang dengan singkat dan ramah menggunakan suaramu sendiri bahwa kamu akan memanggilkan ${PERSONA_DISPLAY_NAMES[requested]} (misalnya: "Ok tunggu sebentar, akan saya panggilkan ${PERSONA_DISPLAY_NAMES[requested]}").`,
                       },
                     });
@@ -323,6 +350,77 @@ export function createLiveBridge(params: {
                       response: {
                         ok: false,
                         error: 'Khusus akun Admin+ atau Admin Utama terverifikasi.',
+                      },
+                    });
+                  }
+                } else if (name === 'save_public_memory') {
+                  if (canManagePublicMemories && authContext.idToken && authContext.uid) {
+                    const title = String(args.title || 'Pengingat Umum').trim();
+                    const content = String(args.content || '').trim();
+                    const saved = await savePublicMemoryServer({
+                      idToken: authContext.idToken,
+                      uid: authContext.uid,
+                      title,
+                      content,
+                    });
+                    if (saved.ok && saved.memory) {
+                      publicMemories.push(saved.memory);
+                      sendJson({
+                        memoryAction: { type: 'saved', detail: saved.memory.title },
+                      });
+                    }
+                    responses.push({
+                      id: fc.id,
+                      name,
+                      response: saved.ok
+                        ? { ok: true, title: saved.memory?.title }
+                        : { ok: false, error: saved.error },
+                    });
+                  } else {
+                    responses.push({
+                      id: fc.id,
+                      name,
+                      response: {
+                        ok: false,
+                        error: 'Khusus akun Admin terverifikasi ke atas.',
+                      },
+                    });
+                  }
+                } else if (name === 'delete_public_memory') {
+                  if (canManagePublicMemories && authContext.idToken) {
+                    const keyword = String(args.keyword || '').trim();
+                    const deleted = await deletePublicMemoriesByKeywordServer({
+                      idToken: authContext.idToken,
+                      keyword,
+                    });
+                    if (deleted.ok && deleted.deletedTitles.length > 0) {
+                      const lowerDeleted = deleted.deletedTitles.map((t) => t.toLowerCase());
+                      for (let i = publicMemories.length - 1; i >= 0; i--) {
+                        if (lowerDeleted.includes(publicMemories[i].title.toLowerCase())) {
+                          publicMemories.splice(i, 1);
+                        }
+                      }
+                      sendJson({
+                        memoryAction: {
+                          type: 'deleted',
+                          detail: deleted.deletedTitles.join(', '),
+                        },
+                      });
+                    }
+                    responses.push({
+                      id: fc.id,
+                      name,
+                      response: deleted.ok
+                        ? { ok: true, deletedTitles: deleted.deletedTitles }
+                        : { ok: false, error: deleted.error },
+                    });
+                  } else {
+                    responses.push({
+                      id: fc.id,
+                      name,
+                      response: {
+                        ok: false,
+                        error: 'Khusus akun Admin terverifikasi ke atas.',
                       },
                     });
                   }

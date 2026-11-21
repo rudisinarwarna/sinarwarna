@@ -3,6 +3,7 @@ import type { User } from 'firebase/auth';
 import {
   CheckCircle2,
   Download,
+  MessageSquareText,
   Moon,
   PlusSquare,
   Settings,
@@ -19,6 +20,7 @@ import { SinarLogo } from './SinarLogo';
 interface SettingsModalProps {
   isOpen: boolean;
   isDark: boolean;
+  showLiveTranscript: boolean;
   isInstallable: boolean;
   isInstalled: boolean;
   isIOS: boolean;
@@ -27,12 +29,14 @@ interface SettingsModalProps {
   currentUser?: User | null;
   onClose: () => void;
   onSetTheme: (dark: boolean) => void;
+  onSetShowLiveTranscript: (show: boolean) => void;
   onInstallAndroid: () => Promise<boolean>;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   isDark,
+  showLiveTranscript,
   isInstallable,
   isInstalled,
   isIOS,
@@ -41,6 +45,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   currentUser = null,
   onClose,
   onSetTheme,
+  onSetShowLiveTranscript,
   onInstallAndroid,
 }) => {
   const [activeTab, setActiveTab] = useState<'general' | 'admin'>('general');
@@ -177,6 +182,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   >
                     <Moon className="h-4 w-4 text-blue-400 shrink-0" />
                     <span>Tema Gelap</span>
+                  </button>
+                </div>
+              </section>
+
+              <div className="border-t border-zinc-200/80 dark:border-[#242C44]" />
+
+              {/* Kotak Teks Bicara di AI Live */}
+              <section className="space-y-2.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="flex items-center gap-1.5 text-sm font-semibold text-zinc-900 dark:text-white">
+                      <MessageSquareText className="h-4 w-4 text-[#0A36FF] dark:text-blue-400 shrink-0" />
+                      <span>Kotak Teks Bicara AI Live</span>
+                    </h3>
+                    <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                      Tampilkan atau sembunyikan kotak teks percakapan langsung saat memakai AI Live.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 rounded-2xl bg-zinc-100 p-1.5 dark:bg-[#0B0F1A]">
+                  <button
+                    type="button"
+                    onClick={() => onSetShowLiveTranscript(true)}
+                    className={`flex min-h-[42px] items-center justify-center gap-2 rounded-xl px-3 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                      showLiveTranscript
+                        ? 'bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] text-white shadow-sm'
+                        : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                    }`}
+                  >
+                    <span>Hidupkan Teks</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSetShowLiveTranscript(false)}
+                    className={`flex min-h-[42px] items-center justify-center gap-2 rounded-xl px-3 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                      !showLiveTranscript
+                        ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
+                        : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                    }`}
+                  >
+                    <span>Matikan Teks</span>
                   </button>
                 </div>
               </section>

@@ -136,6 +136,43 @@ export const ADMIN_MEMORY_DECLARATIONS: FunctionDeclaration[] = [
   },
 ];
 
+export const PUBLIC_MEMORY_DECLARATIONS: FunctionDeclaration[] = [
+  {
+    name: 'save_public_memory',
+    description:
+      'Menyimpan pengingat umum baru agar diketahui dan berlaku untuk SEMUA pengguna & pelanggan Sinar Warna.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        title: {
+          type: Type.STRING,
+          description: 'Judul singkat pengingat umum (maksimal 100 karakter).',
+        },
+        content: {
+          type: Type.STRING,
+          description: 'Isi lengkap informasi atau pengingat umum untuk semua pengguna.',
+        },
+      },
+      required: ['title', 'content'],
+    },
+  },
+  {
+    name: 'delete_public_memory',
+    description:
+      'Menghapus pengingat umum dari database berdasarkan kata kunci topik atau isi yang disebutkan admin.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        keyword: {
+          type: Type.STRING,
+          description: 'Kata kunci atau frasa pengingat umum yang ingin dihapus.',
+        },
+      },
+      required: ['keyword'],
+    },
+  },
+];
+
 export const LIVE_SWITCH_PERSONA_DECLARATION: FunctionDeclaration = {
   name: 'switch_persona',
   description:
@@ -171,7 +208,34 @@ export const LIVE_OWIE_CAPTION_DECLARATION: FunctionDeclaration = {
   },
 };
 
-function formatAdminPrivateMemoriesBlock(memories: AdminMemoryItem[]): string {
+const SEMI_GAUL_MANDATE = [
+  'ATURAN GAYA BICARA WAJIB (MODE SEMI-GAUL — PRIORITAS MUTLAK):',
+  'Kamu sekarang berbicara langsung dengan Admin / orang dalam Sinar Warna. WAJIB pakai Bahasa Indonesia semi-gaul yang santai, akrab, dan luwes:',
+  '1. DILARANG KERAS memakai kata ganti formal "saya", "Anda", "saudara", atau nada CS kaku. GANTI semua "saya" menjadi "gua" (atau "gue") dan semua "Anda/kamu" menjadi "lu".',
+  '2. Pakai partikel obrolan santai Indonesia yang natural seperti "nih", "sih", "dong", "deh", "ya", "banget", "oke siap", "gampang", "mantap".',
+  '3. Contoh gaya bicara yang BENAR: "Yo siap bos! Menurut gua sih mending lu pakai cat dasar dulu biar warnanya makin keluar. Mau gua bantuin cari kode warnanya?"',
+  '4. Contoh SALAH yang DILARANG: "Baik, saya akan membantu Anda memilih warna cat yang tepat."',
+].join('\n');
+
+function formatPublicMemoriesBlock(memories: AdminMemoryItem[]): string {
+  if (!memories || memories.length === 0) return '';
+  const lines = memories.map((m, idx) => `${idx + 1}. [${m.title}] ${m.content}`);
+  return [
+    'PENGINGAT UMUM TOKO (BERLAKU UNTUK SEMUA PENGGUNA & PELANGGAN):',
+    ...lines,
+  ].join('\n');
+}
+
+function formatAdminPrivateMemoriesBlock(
+  memories: AdminMemoryItem[],
+  summaryOverride?: string
+): string {
+  if (summaryOverride && summaryOverride.trim()) {
+    return [
+      'PENGINGAT PRIBADI ADMIN (RAHASIA INTERNAL — HANYA BERLAKU SAAT MODE ADMIN AKTIF):',
+      summaryOverride.trim(),
+    ].join('\n');
+  }
   if (!memories || memories.length === 0) {
     return [
       'PENGINGAT PRIBADI ADMIN (HANYA UNTUK ADMIN):',
@@ -188,32 +252,71 @@ function formatAdminPrivateMemoriesBlock(memories: AdminMemoryItem[]): string {
 
 export function buildChatSystemInstruction(options: {
   mode: string;
-  isAdmin: boolean;
+  useSemiGaul: boolean;
+  includePrivateMemories: boolean;
   adminMemories?: AdminMemoryItem[];
+  privateMemoriesSummary?: string;
+  publicMemories?: AdminMemoryItem[];
+  canManageAdminMemories?: boolean;
+  canManagePublicMemories?: boolean;
 }): string {
   const base = MODE_BASE_PROMPTS[options.mode] || MODE_BASE_PROMPTS.general;
+  const publicBlock = formatPublicMemoriesBlock(options.publicMemories || []);
 
-  if (!options.isAdmin) {
+  if (!options.useSemiGaul && !options.includePrivateMemories) {
     return [
       base,
+      publicBlock,
       'Bahasa utamamu adalah Bahasa Indonesia yang ramah, jelas, santun, dan membantu.',
-      'Kamu berbicara dengan pelanggan/pengguna umum. Jawab pertanyaan seputar Toko Cat Sinar Warna (hanya 2 cabang: Dadap & Salembaran, serta jasa cat oplos duco, synthetic, tembok) dan konsultasi cat/kreatif dengan sopan.',
-    ].join(' ');
+      'Kamu berbicara dengan pelanggan/pengguna umum. Jawab pertanyaan seputar Toko Cat Sinar Warna (hanya 2 cabang: Dadap & Salembaran, serta jasa cat oplos duco, synthetic, tembok, serta semua Pengingat Umum di atas) dan konsultasi cat/kreatif dengan sopan.',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
   }
 
-  const memories = options.adminMemories || [];
+  const privateBlock = options.includePrivateMemories
+    ? formatAdminPrivateMemoriesBlock(options.adminMemories || [], options.privateMemoriesSummary)
+    : '';
+
+  const toolNotes: string[] = [];
+  if (options.canManagePublicMemories) {
+    toolNotes.push(
+      'PENGELOLAAN PENGINGAT UMUM: Jika admin meminta menyimpan pengingat umum/toko untuk semua orang, panggil `save_public_memory`. Jika meminta menghapus pengingat umum, panggil `delete_public_memory`.'
+    );
+  }
+  if (options.canManageAdminMemories) {
+    toolNotes.push(
+      'PENGELOLAAN PENGINGAT PRIBADI: Jika admin meminta menyimpan pengingat pribadi internal admin (seperti keluarga/hal pribadi), panggil `save_admin_memory`. Jika meminta menghapus ingatan pribadi, panggil `delete_admin_memory`.'
+    );
+  }
+
   return [
+    options.useSemiGaul ? SEMI_GAUL_MANDATE : '',
     base,
-    'MODE ADMIN AKTIF (GAYA BAHASA SEMI-GAUL): Kamu sedang berbicara langsung dengan Admin Sinar Warna!',
-    'Gunakan Bahasa Indonesia bergaya semi-gaul yang santai, akrab, luwes, dan bersahabat — gunakan kata ganti "gua" dan "lu" secara natural (contoh: "Siap bos, menurut gua...", "Lu mau bikin warna apa nih?"), tanpa mengurangi ketepatan informasi cat.',
-    formatAdminPrivateMemoriesBlock(memories),
-    'KEMAMPUAN INGATAN ADMIN: Jika admin meminta kamu mengingat hal baru (misalnya "ingat bahwa...", "catat ini..."), panggil tool `save_admin_memory` agar pengingat tersimpan dan diketahui semua admin. Jika admin meminta menghapus/melupakan suatu pengingat (misalnya "hapus ingatan tentang..."), panggil tool `delete_admin_memory` dengan kata kuncinya.',
-  ].join('\n\n');
+    publicBlock,
+    privateBlock,
+    ...toolNotes,
+    options.useSemiGaul
+      ? 'INGAT SEKALI LAGI: Balas selalu dengan gaya semi-gaul ("gua"/"lu", santai, akrab) — JANGAN PERNAH memakai "saya" atau "Anda".'
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
-export function getChatToolsForUser(isAdmin: boolean): Tool[] | undefined {
-  if (!isAdmin) return undefined;
-  return [{ functionDeclarations: ADMIN_MEMORY_DECLARATIONS }];
+export function getChatToolsForUser(options: {
+  canManageAdminMemories: boolean;
+  canManagePublicMemories: boolean;
+}): Tool[] | undefined {
+  const declarations: FunctionDeclaration[] = [];
+  if (options.canManagePublicMemories) {
+    declarations.push(...PUBLIC_MEMORY_DECLARATIONS);
+  }
+  if (options.canManageAdminMemories) {
+    declarations.push(...ADMIN_MEMORY_DECLARATIONS);
+  }
+  if (declarations.length === 0) return undefined;
+  return [{ functionDeclarations: declarations }];
 }
 
 export const PERSONA_DISPLAY_NAMES: Record<CanonicalVoiceId, string> = {
@@ -312,8 +415,13 @@ export function buildLivePersonaSessionConfig(
   rawVoice: string,
   mode: string,
   options?: {
-    isAdmin?: boolean;
+    useSemiGaul?: boolean;
+    includePrivateMemories?: boolean;
     adminMemories?: AdminMemoryItem[];
+    privateMemoriesSummary?: string;
+    publicMemories?: AdminMemoryItem[];
+    canManageAdminMemories?: boolean;
+    canManagePublicMemories?: boolean;
     handoffFrom?: CanonicalVoiceId | null;
     recentContext?: string;
     customOpeningGreeting?: string;
@@ -321,13 +429,16 @@ export function buildLivePersonaSessionConfig(
 ) {
   const personaId = normalizePersonaId(rawVoice);
   const details = VOICE_PERSONA_DETAILS[personaId];
-  const isAdmin = Boolean(options?.isAdmin);
+  const useSemiGaul = Boolean(options?.useSemiGaul);
+  const includePrivateMemories = Boolean(options?.includePrivateMemories);
   const adminMemories = options?.adminMemories || [];
+  const publicMemories = options?.publicMemories || [];
   const customGreeting = (options?.customOpeningGreeting || '').trim().slice(0, 500);
   const modeBase = MODE_BASE_PROMPTS[mode] || MODE_BASE_PROMPTS.general;
+  const publicBlock = formatPublicMemoriesBlock(publicMemories);
 
-  const toneRule = isAdmin
-    ? 'GAYA BICARA ADMIN: Kamu sedang berbicara dengan Admin Sinar Warna! Pakai Bahasa Indonesia semi-gaul yang santai, akrab, dan asyik (pakai "gua" dan "lu").'
+  const toneRule = useSemiGaul
+    ? SEMI_GAUL_MANDATE
     : 'GAYA BICARA PELANGGAN: Gunakan Bahasa Indonesia yang ramah, santun, jelas, dan profesional.';
 
   const handoffInstruction = [
@@ -335,7 +446,9 @@ export function buildLivePersonaSessionConfig(
     'Anggota suara yang tersedia di sesi Live ini adalah: Santi (alias Susan/Mia/Sui), Cynthia, Awen (alias Abun), Cyndi, dan Owie.',
     'Jika pengguna meminta berbicara dengan suara lain (misal "panggil Awen", "saya mau bicara sama Cynthia", "suruh Santi masuk", atau memanggil Owie):',
     '1. Panggil fungsi `switch_persona` dengan `targetPersona` sesuai orang yang dipanggil (`santi`, `cynthia`, `awen`, `cyndi`, atau `owie`).',
-    '2. Sebelum koneksi beralih, jawab ramah terlebih dahulu dengan suaramu sendiri (misalnya: "Ok tunggu sebentar, akan saya panggilkan [Nama]" atau versi semi-gaul untuk admin "Ok tunggu bentar ya, gua panggilin [Nama] dulu").',
+    useSemiGaul
+      ? '2. Sebelum koneksi beralih, jawab santai pakai bahasa semi-gaul lu/gua (misalnya: "Oke tunggu bentar ya, gua panggilin [Nama] dulu nih!").'
+      : '2. Sebelum koneksi beralih, jawab ramah terlebih dahulu dengan suaramu sendiri (misalnya: "Ok tunggu sebentar, akan saya panggilkan [Nama]").',
   ].join(' ');
 
   const owieSpecialRules =
@@ -343,28 +456,44 @@ export function buildLivePersonaSessionConfig(
       ? [
           'ATURAN MUTLAK OWIE SI ANJING CHIHUAHUA (SANGAT PENTING):',
           '1. Kamu mengerti 100% apa yang dibicarakan pengguna dalam Bahasa Indonesia.',
-          '2. Di SETIAP balasanmu (termasuk saat menyapa atau memanggil anggota lain), kamu WAJIB memanggil fungsi `owie_caption` dengan `indonesian_reply` berisi jawaban lengkap, cerdas, dan jelas dalam Bahasa Indonesia (pakai gaya semi-gaul lu/gua jika berbicara dengan admin, atau ramah sopan jika pelanggan umum).',
+          '2. Di SETIAP balasanmu (termasuk saat menyapa atau memanggil anggota lain), kamu WAJIB memanggil fungsi `owie_caption` dengan `indonesian_reply` berisi jawaban lengkap, cerdas, dan jelas dalam Bahasa Indonesia' +
+            (useSemiGaul
+              ? ' dengan gaya semi-gaul lu/gua yang santai dan asyik.'
+              : ' dengan gaya ramah dan sopan.'),
           '3. Sistem otomatis memutar rekaman suara gonggongan anjing Chihuahua asli begitu kamu memanggil `owie_caption`. Jadi setelah memanggil `owie_caption`, cukup tutup giliranmu dengan sangat singkat ("Guk!") tanpa berpidato panjang.',
         ].join(' ')
       : '';
 
-  const adminMemoryBlock = isAdmin
+  const adminMemoryBlock = includePrivateMemories
     ? [
-        formatAdminPrivateMemoriesBlock(adminMemories),
-        'Jika admin memintamu mengingat sesuatu yang baru, panggil `save_admin_memory`. Jika admin memintamu melupakan/menghapus suatu pengingat, panggil `delete_admin_memory`.',
-      ].join('\n')
+        formatAdminPrivateMemoriesBlock(adminMemories, options?.privateMemoriesSummary),
+        options?.canManageAdminMemories
+          ? 'Jika admin memintamu mengingat sesuatu yang baru untuk pribadi/internal, panggil `save_admin_memory`. Jika meminta melupakan pengingat pribadi, panggil `delete_admin_memory`.'
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : '';
+
+  const publicToolBlock = options?.canManagePublicMemories
+    ? 'Jika admin memintamu menyimpan pengingat umum/toko untuk semua orang, panggil `save_public_memory`. Jika meminta menghapus pengingat umum, panggil `delete_public_memory`.'
     : '';
 
   const liveSystemInstruction = [
-    modeBase,
-    isAdmin ? details.adminPersonaPrompt : details.publicPersonaPrompt,
-    details.voiceGenderLock,
     toneRule,
+    modeBase,
+    includePrivateMemories ? details.adminPersonaPrompt : details.publicPersonaPrompt,
+    details.voiceGenderLock,
+    publicBlock,
     adminMemoryBlock,
+    publicToolBlock,
     handoffInstruction,
     owieSpecialRules,
     'Ini adalah sesi percakapan suara & kamera langsung (Live) yang bersifat real-time.',
     'Jika kamera aktif dan kamu menerima frame gambar, jelaskan atau beri masukan seputar warna, cat, atau objek yang terlihat secara natural.',
+    useSemiGaul
+      ? 'PENGINGAT TERAKHIR: Bicara wajib pakai gaya semi-gaul ("gua"/"lu", santai, akrab), DILARANG keras menyebut "saya" atau "Anda".'
+      : '',
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -377,13 +506,13 @@ export function buildLivePersonaSessionConfig(
       : '';
     if (personaId === 'owie') {
       greetingPrompt = `Kamu (Owie si anjing Chihuahua) baru saja dipanggil masuk ke obrolan oleh ${prevName}.${ctxNote} Segera panggil fungsi owie_caption dengan indonesian_reply berisi sapaan seperti "${
-        isAdmin ? 'Guk! Ada apa nyari gua nih, bos?' : 'Guk! Ada apa cari Owie?'
+        useSemiGaul ? 'Guk! Ada apaan nyari gua nih, bos?' : 'Guk! Ada apa cari Owie?'
       }" lalu akhiri giliranmu singkat.`;
     } else {
       greetingPrompt = `Kamu (${PERSONA_DISPLAY_NAMES[personaId]}) baru saja dipanggil masuk menggantikan ${prevName}.${ctxNote} Tetap gunakan suara ${
         personaId === 'awen' ? 'PRIA' : 'WANITA'
       } aslimu yang konsisten! Segera sapa pengguna sekarang secara langsung dengan kalimat pembuka singkat seperti: "${
-        isAdmin ? 'Halo! Ada apa nyari gua?' : 'Ada apa cari saya?'
+        useSemiGaul ? 'Yo halo! Ada apaan nih nyari gua?' : 'Ada apa cari saya?'
       }"`;
     }
   } else if (customGreeting) {
@@ -396,15 +525,15 @@ export function buildLivePersonaSessionConfig(
     }
   } else if (personaId === 'owie') {
     greetingPrompt = `Sesi Live baru saja dibuka dan kamu adalah Owie si Chihuahua. Segera panggil fungsi owie_caption dengan indonesian_reply berisi: "${
-      isAdmin
-        ? 'Guk! Halo bos! Gua Owie nih, ada yang mau ditanya soal cat atau toko?'
+      useSemiGaul
+        ? 'Guk! Yo halo bos! Gua Owie nih, ada yang mau lu tanyain soal cat atau toko?'
         : 'Guk! Hi apa kabar, ada yang mau ditanya seputar cat atau lainnya?'
     }", lalu akhiri giliranmu singkat.`;
   } else {
-    greetingPrompt = isAdmin
-      ? `Sesi Live baru saja dibuka dengan Admin. Tetap pertahankan suara ${
+    greetingPrompt = useSemiGaul
+      ? `Sesi Live baru saja dibuka dalam mode Admin semi-gaul. Tetap pertahankan suara ${
           personaId === 'awen' ? 'PRIA' : 'WANITA'
-        } konsistenmu sebagai ${PERSONA_DISPLAY_NAMES[personaId]}. Segera sapa admin dengan gaya semi-gaul santai (lu/gua) yang akrab: "Halo! Ada yang mau lu tanyain soal cat atau lainnya?"`
+        } konsistenmu sebagai ${PERSONA_DISPLAY_NAMES[personaId]}. Segera sapa pakai bahasa semi-gaul santai (lu/gua, TANPA kata saya/Anda): "Yo halo! Ada yang mau lu tanyain soal cat atau apaan nih?"`
       : `Sesi Live baru saja dibuka. Tetap pertahankan suara ${
           personaId === 'awen' ? 'PRIA' : 'WANITA'
         } konsistenmu sebagai ${PERSONA_DISPLAY_NAMES[personaId]}. Segera sapa pengguna sekarang dalam Bahasa Indonesia dengan ramah dan natural menggunakan kalimat sapaan berikut: "Hi apa kabar, ada yang mau di tanya seputar cat atau lainnya?"`;
@@ -414,7 +543,10 @@ export function buildLivePersonaSessionConfig(
   if (personaId === 'owie') {
     declarations.push(LIVE_OWIE_CAPTION_DECLARATION);
   }
-  if (isAdmin) {
+  if (options?.canManagePublicMemories) {
+    declarations.push(...PUBLIC_MEMORY_DECLARATIONS);
+  }
+  if (options?.canManageAdminMemories) {
     declarations.push(...ADMIN_MEMORY_DECLARATIONS);
   }
 

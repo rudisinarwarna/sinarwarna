@@ -196,6 +196,76 @@
       },
       "required": ["greetingText", "updatedBy", "createdAt", "updatedAt"]
     },
+    "AppFreewillSettings": {
+      "title": "AppFreewillSettings",
+      "description": "Global FREEWILL toggle controlled exclusively by Primary Admin.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether FREEWILL mode elevates all registered users and guests with admin AI effects."
+        },
+        "memoriesSummary": {
+          "type": "string",
+          "maxLength": 10000,
+          "description": "Non-PII private memories summary active only while FREEWILL is enabled."
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["enabled", "memoriesSummary", "updatedBy", "createdAt", "updatedAt"]
+    },
+    "PublicMemory": {
+      "title": "PublicMemory",
+      "description": "Non-PII general store/service memory active in AI for everyone and managed by Admin tier and above.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "isPublic": {
+          "type": "boolean"
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "title", "content", "isPublic", "createdBy", "createdAt", "updatedAt"]
+    },
     "Conversation": {
       "title": "Conversation",
       "description": "A creative chat session owned by a specific authenticated user.",
@@ -312,9 +382,13 @@
       "schema": { "$ref": "#/entities/AdminSeedMeta" },
       "description": "Admin+ seed status document."
     },
+    "/publicMemories/{memoryId}": {
+      "schema": { "$ref": "#/entities/PublicMemory" },
+      "description": "General non-PII AI memories active for all users and managed by Admin and above."
+    },
     "/appConfig/{docId}": {
       "schema": { "$ref": "#/entities/AppLiveSettings" },
-      "description": "Publicly readable AI Live opening greeting config writable exclusively by Admin+ and Primary Admin."
+      "description": "App configuration docs ('live' for Admin+ opening greeting, 'freewill' for Primary Admin FREEWILL toggle)."
     },
     "/conversations/{conversationId}": {
       "schema": { "$ref": "#/entities/Conversation" },
