@@ -127,8 +127,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {(isCloudUser ?? Boolean(user))
               ? 'Riwayat Cloud'
               : user
-              ? 'Riwayat Lokal (Belum Verifikasi)'
-              : 'Riwayat Lokal'}
+              ? 'Riwayat (Belum Verifikasi)'
+              : 'Riwayat (Mode Tamu)'}
           </span>
           {conversations.length > 0 && (
             <span className="text-[11px] font-mono tabular-nums text-zinc-400 dark:text-zinc-500">
@@ -154,7 +154,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex-1 space-y-1 overflow-y-auto pb-3">
           {filteredConversations.length === 0 ? (
             <p className="px-2 py-4 text-xs leading-relaxed text-zinc-500 dark:text-zinc-500">
-              {conversations.length === 0
+              {!(isCloudUser ?? Boolean(user))
+                ? 'Belum daftar/masuk akun. Obrolan sementara ini tidak disimpan di riwayat dan akan hilang setelah keluar.'
+                : conversations.length === 0
                 ? 'Belum ada riwayat. Mulai percakapan untuk menyimpan ide kreatif Anda.'
                 : 'Tidak ada percakapan yang cocok.'}
             </p>

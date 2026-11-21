@@ -63,9 +63,10 @@ import type {
   ThinkingDepth,
 } from './types/chat';
 
-const STORAGE_KEY = 'sinar-warna-chats-v1';
+const LEGACY_STORAGE_KEY = 'sinar-warna-chats-v1';
 const THEME_KEY = 'sinar-warna-theme';
-const LIVE_TRANSCRIPT_KEY = 'sinar-warna-live-transcript';
+const LEGACY_LIVE_TRANSCRIPT_KEY = 'sinar-warna-live-transcript';
+const LIVE_TRANSCRIPT_KEY = 'sinar-warna-live-transcript-v2';
 
 function loadInitialTheme(): boolean {
   try {
@@ -80,36 +81,18 @@ function loadInitialTheme(): boolean {
 
 function loadInitialLiveTranscript(): boolean {
   try {
-    return localStorage.getItem(LIVE_TRANSCRIPT_KEY) !== 'false';
+    localStorage.removeItem(LEGACY_LIVE_TRANSCRIPT_KEY);
+    return localStorage.getItem(LIVE_TRANSCRIPT_KEY) === 'true';
   } catch {
-    return true;
+    return false;
   }
 }
 
-function loadSavedConversations(): Conversation[] {
+function clearLegacyGuestStorage() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
   } catch {
-    return [];
-  }
-}
-
-function persistLocalConversations(conversations: Conversation[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
-  } catch {
-    try {
-      const stripped = conversations.map((conv) => ({
-        ...conv,
-        messages: conv.messages.map((m) => ({ ...m, attachments: undefined })),
-      }));
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(stripped));
-    } catch {
-      // Ignore storage failure
-    }
+    // Ignore storage removal failure
   }
 }
 
@@ -133,9 +116,8 @@ export default function App() {
   );
   const [verificationBannerDismissed, setVerificationBannerDismissed] = useState<boolean>(false);
 
-  // Local guest conversations
-  const [localConversations, setLocalConversations] =
-    useState<Conversation[]>(loadSavedConversations);
+  // Ephemeral guest conversations (in-memory only for current visit, never persisted)
+  const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
 
   // Cloud Firestore conversations & messages for active conversation
   const [cloudConversations, setCloudConversations] = useState<Conversation[]>([]);
@@ -147,10 +129,7 @@ export default function App() {
     Record<string, ImageAttachment[]>
   >({});
 
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(() => {
-    const saved = loadSavedConversations();
-    return saved.length > 0 ? saved[0].id : null;
-  });
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
 
   const [activeMode, setActiveMode] = useState<CreativeModeId>('general');
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -215,6 +194,7 @@ export default function App() {
       if (firebaseUser) {
         setAuthModalOpen(false);
         if (verified) {
+          setLocalConversations([]);
           const primary = isPrimaryAdminUser(firebaseUser);
           setAdminLevel(primary ? 'primary' : 'none');
           setIsVerifiedBadge(primary);
@@ -255,9 +235,12 @@ export default function App() {
         setAdminLevel('none');
         setIsVerifiedBadge(false);
         setAdminModalOpen(false);
+        setLocalConversations([]);
         setCloudConversations([]);
         setCloudMessagesByConv({});
         setPendingMessagesByConv({});
+        setInMemoryAttachments({});
+        setActiveConversationId(null);
       }
     });
     return () => unsubscribe();
@@ -372,12 +355,10 @@ export default function App() {
     }
   }, [showLiveTranscript]);
 
-  // Persist local conversations when not using verified cloud sync
+  // Remove any legacy local chat storage so unregistered/guest chats never persist across visits
   useEffect(() => {
-    if (!isCloudUser) {
-      persistLocalConversations(localConversations);
-    }
-  }, [localConversations, isCloudUser]);
+    clearLegacyGuestStorage();
+  }, []);
 
   const conversations = isCloudUser ? cloudConversations : localConversations;
 
@@ -487,6 +468,8 @@ export default function App() {
     setLiveModalOpen(false);
     setCameraModalOpen(false);
     setSidebarMobileOpen(false);
+    setLocalConversations([]);
+    setInMemoryAttachments({});
     setActiveConversationId(null);
     await signOutUser();
   }, []);
@@ -502,7 +485,11 @@ export default function App() {
   const handleNewChat = useCallback(() => {
     stopStreaming();
     setActiveConversationId(null);
-  }, [stopStreaming]);
+    if (!isCloudUser) {
+      setLocalConversations([]);
+      setInMemoryAttachments({});
+    }
+  }, [isCloudUser, stopStreaming]);
 
   const handleSelectConversation = useCallback(
     (id: string) => {
@@ -1080,7 +1067,7 @@ export default function App() {
         isVerifiedBadge={effectiveVerifiedBadge}
         authReady={authReady}
         authLoading={false}
-        conversations={conversations}
+        conversations={isCloudUser ? conversations : []}
         activeConversationId={activeConversationId}
         onCloseMobile={() => setSidebarMobileOpen(false)}
         onToggleDesktop={() => setSidebarDesktopOpen(false)}
@@ -1217,7 +1204,7 @@ export default function App() {
               <MailCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#0A36FF] dark:text-blue-400" />
               <span className="leading-relaxed">
                 Akun <strong>{user.email || 'Anda'}</strong> belum terverifikasi. Verifikasi email
-                untuk mengaktifkan Riwayat Cloud (sementara chat disimpan lokal).
+                untuk menyimpan riwayat percakapan (sementara obrolan tidak disimpan ke riwayat).
               </span>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
@@ -1259,7 +1246,7 @@ export default function App() {
         {/* Main Chat Viewport */}
         <main className="flex-1 overflow-y-auto">
           {messages.length === 0 ? (
-            <div className="flex min-h-full items-center justify-center">
+            <div className="flex min-h-full w-full items-stretch justify-center">
               <WelcomeCanvas />
             </div>
           ) : (
