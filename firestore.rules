@@ -28,8 +28,35 @@ service cloud.firestore {
       return request.auth.token.email_verified == true;
     }
 
+    function isPrimaryAdmin() {
+      return isSignedIn() &&
+        isVerified() &&
+        request.auth.token.email == 'rudi.sinarwarna@gmail.com';
+    }
+
+    function isAdmin() {
+      return isPrimaryAdmin() || (
+        isSignedIn() &&
+        isVerified() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
     function isOwner(userId) {
       return isSignedIn() && isVerified() && request.auth.uid == userId;
+    }
+
+    function isNotBlocked() {
+      return !exists(/databases/$(database)/documents/users/$(request.auth.uid)) || (
+        (
+          !('blocked' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.blocked != true
+        ) &&
+        (
+          !('deleted' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data) ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.deleted != true
+        )
+      );
     }
 
     function isParentConversationOwner(conversationId) {
@@ -39,15 +66,65 @@ service cloud.firestore {
 
     // Validation Blueprints
     function isValidUserProfile(data, userId) {
-      return data.keys().hasAll(['uid', 'displayName', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['uid', 'displayName', 'photoUrl', 'createdAt', 'updatedAt']) &&
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'blocked', 'deleted', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'email', 'photoUrl', 'role', 'verifiedBadge', 'blocked', 'deleted', 'createdAt', 'updatedAt']) &&
         isValidId(data.uid) &&
         data.uid == userId &&
-        data.uid == request.auth.uid &&
         data.displayName is string &&
         data.displayName.size() >= 1 &&
         data.displayName.size() <= 100 &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 200)) &&
         (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 500)) &&
+        data.role is string &&
+        data.role.size() <= 16 &&
+        data.role in ['user', 'admin'] &&
+        (!('verifiedBadge' in data) || data.verifiedBadge is bool) &&
+        data.blocked is bool &&
+        data.deleted is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAdminGrant(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'grantedBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'grantedBy', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.uid == userId &&
+        data.email is string &&
+        data.email.size() <= 200 &&
+        data.grantedBy is string &&
+        data.grantedBy.size() >= 1 &&
+        data.grantedBy.size() <= 128 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAdminMemory(data, memoryId) {
+      return data.keys().hasAll(['id', 'title', 'content', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'title', 'content', 'createdBy', 'createdByEmail', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.id == memoryId &&
+        data.title is string &&
+        data.title.size() >= 1 &&
+        data.title.size() <= 120 &&
+        data.content is string &&
+        data.content.size() >= 1 &&
+        data.content.size() <= 2000 &&
+        data.createdBy is string &&
+        data.createdBy.size() >= 1 &&
+        data.createdBy.size() <= 128 &&
+        (!('createdByEmail' in data) || (data.createdByEmail is string && data.createdByEmail.size() <= 200)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAdminSeedMeta(data) {
+      return data.keys().hasAll(['seededDefaultMemories', 'updatedBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['seededDefaultMemories', 'updatedBy', 'createdAt', 'updatedAt']) &&
+        data.seededDefaultMemories is bool &&
+        data.updatedBy is string &&
+        data.updatedBy.size() >= 1 &&
+        data.updatedBy.size() <= 128 &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -94,24 +171,97 @@ service cloud.firestore {
 
     // Users Collection
     match /users/{userId} {
-      allow get: if isOwner(userId) && isValidId(userId);
-      allow list: if false;
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
       allow create: if isOwner(userId) &&
         isValidId(userId) &&
+        incoming().uid == request.auth.uid &&
         isValidUserProfile(incoming(), userId) &&
+        (incoming().role == 'user' || (isPrimaryAdmin() && incoming().role == 'admin')) &&
+        (!('verifiedBadge' in incoming()) || incoming().verifiedBadge == false || (isPrimaryAdmin() && incoming().verifiedBadge == true)) &&
+        incoming().blocked == false &&
+        incoming().deleted == false &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isOwner(userId) &&
-        isValidId(userId) &&
+      allow update: if isValidId(userId) &&
         isValidUserProfile(incoming(), userId) &&
         incoming().uid == existing().uid &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         (
-          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt']) ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['photoUrl', 'updatedAt']) ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoUrl', 'updatedAt'])
+          (
+            isOwner(userId) &&
+            isNotBlocked() &&
+            (!('blocked' in existing()) ? incoming().blocked == false : incoming().blocked == existing().blocked) &&
+            (!('deleted' in existing()) ? incoming().deleted == false : incoming().deleted == existing().deleted) &&
+            (!('role' in existing())
+              ? (incoming().role == 'user' || (isPrimaryAdmin() && incoming().role == 'admin'))
+              : (incoming().role == existing().role || (isPrimaryAdmin() && incoming().role == 'admin'))) &&
+            (!('verifiedBadge' in existing())
+              ? (!('verifiedBadge' in incoming()) || incoming().verifiedBadge == false || (isPrimaryAdmin() && incoming().verifiedBadge == true) || incoming().role == 'admin')
+              : (!('verifiedBadge' in incoming()) || incoming().verifiedBadge == existing().verifiedBadge || (isPrimaryAdmin() && incoming().verifiedBadge == true))) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'role', 'verifiedBadge', 'blocked', 'deleted', 'updatedAt'])
+          ) ||
+          (
+            isAdmin() &&
+            (!('email' in existing()) || existing().email != 'rudi.sinarwarna@gmail.com') &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['role', 'verifiedBadge', 'blocked', 'deleted', 'updatedAt'])
+          )
         );
+      allow delete: if isAdmin() &&
+        isValidId(userId) &&
+        (!('email' in existing()) || existing().email != 'rudi.sinarwarna@gmail.com');
+    }
+
+    // Admin Grants Collection
+    match /admins/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(userId) &&
+        isValidAdminGrant(incoming(), userId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (isAdmin() || (isPrimaryAdmin() && request.auth.uid == userId));
+      allow update: if false;
+      allow delete: if isAdmin() &&
+        isValidId(userId) &&
+        existing().email != 'rudi.sinarwarna@gmail.com';
+    }
+
+    // Admin Private AI Memories Collection (shared across all admins, never accessible to non-admins)
+    match /adminMemories/{memoryId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin() &&
+        isValidId(memoryId) &&
+        isValidAdminMemory(incoming(), memoryId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() &&
+        isValidId(memoryId) &&
+        isValidAdminMemory(incoming(), memoryId) &&
+        incoming().id == existing().id &&
+        incoming().createdBy == existing().createdBy &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'content', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(memoryId);
+    }
+
+    // Admin Metadata (one-time default memory seed flag)
+    match /adminMeta/{docId} {
+      allow get: if isAdmin() && docId == 'seed';
+      allow list: if false;
+      allow create: if isAdmin() &&
+        docId == 'seed' &&
+        isValidAdminSeedMeta(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() &&
+        docId == 'seed' &&
+        isValidAdminSeedMeta(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['seededDefaultMemories', 'updatedBy', 'updatedAt']);
       allow delete: if false;
     }
 
@@ -120,18 +270,20 @@ service cloud.firestore {
       allow get: if isSignedIn() &&
         isVerified() &&
         isValidId(conversationId) &&
-        existing().userId == request.auth.uid;
+        (existing().userId == request.auth.uid || isAdmin());
       allow list: if isSignedIn() &&
         isVerified() &&
-        resource.data.userId == request.auth.uid;
+        (resource.data.userId == request.auth.uid || isAdmin());
       allow create: if isSignedIn() &&
         isVerified() &&
+        isNotBlocked() &&
         isValidId(conversationId) &&
         isValidConversation(incoming(), conversationId) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
       allow update: if isSignedIn() &&
         isVerified() &&
+        isNotBlocked() &&
         isValidId(conversationId) &&
         existing().userId == request.auth.uid &&
         isValidConversation(incoming(), conversationId) &&
@@ -148,7 +300,7 @@ service cloud.firestore {
       allow delete: if isSignedIn() &&
         isVerified() &&
         isValidId(conversationId) &&
-        existing().userId == request.auth.uid;
+        (existing().userId == request.auth.uid || isAdmin());
 
       // Messages Subcollection
       match /messages/{messageId} {
@@ -156,13 +308,13 @@ service cloud.firestore {
           isVerified() &&
           isValidId(conversationId) &&
           isValidId(messageId) &&
-          existing().userId == request.auth.uid &&
-          isParentConversationOwner(conversationId);
+          ((existing().userId == request.auth.uid && isParentConversationOwner(conversationId)) || isAdmin());
         allow list: if isSignedIn() &&
           isVerified() &&
-          resource.data.userId == request.auth.uid;
+          (resource.data.userId == request.auth.uid || isAdmin());
         allow create: if isSignedIn() &&
           isVerified() &&
+          isNotBlocked() &&
           isValidId(conversationId) &&
           isValidId(messageId) &&
           isValidMessage(incoming(), conversationId, messageId) &&
@@ -170,6 +322,7 @@ service cloud.firestore {
           isParentConversationOwner(conversationId);
         allow update: if isSignedIn() &&
           isVerified() &&
+          isNotBlocked() &&
           isValidId(conversationId) &&
           isValidId(messageId) &&
           existing().userId == request.auth.uid &&
@@ -189,8 +342,7 @@ service cloud.firestore {
           isVerified() &&
           isValidId(conversationId) &&
           isValidId(messageId) &&
-          existing().userId == request.auth.uid &&
-          isParentConversationOwner(conversationId);
+          ((existing().userId == request.auth.uid && isParentConversationOwner(conversationId)) || isAdmin());
       }
     }
   }

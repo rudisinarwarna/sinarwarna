@@ -17,7 +17,9 @@ import type { User } from 'firebase/auth';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import type { ChatMessage, Conversation, CreativeModeId } from '../types/chat';
 
-function toMillis(ts: unknown): number {
+export const PRIMARY_ADMIN_EMAIL = 'rudi.sinarwarna@gmail.com';
+
+export function toMillis(ts: unknown): number {
   if (ts instanceof Timestamp) return ts.toMillis();
   if (typeof ts === 'number') return ts;
   return Date.now();
@@ -27,32 +29,122 @@ export function sanitizeId(raw: string): string {
   return raw.replace(/[^a-zA-Z0-9_\-]/g, '-').slice(0, 128);
 }
 
-export async function upsertUserProfile(user: User): Promise<void> {
+export function extractUserEmail(user: User | null | undefined): string {
+  if (!user) return '';
+  if (user.email) return user.email.trim().toLowerCase();
+  const providerEmail = user.providerData?.find((p) => Boolean(p?.email))?.email;
+  return providerEmail ? providerEmail.trim().toLowerCase() : '';
+}
+
+export function isUserVerifiedAccount(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (user.emailVerified) return true;
+  return Boolean(
+    user.providerData?.some(
+      (p) => p?.providerId === 'google.com' || p?.providerId === 'apple.com'
+    )
+  );
+}
+
+export function isPrimaryAdminUser(user: User | null | undefined): boolean {
+  return Boolean(
+    isUserVerifiedAccount(user) && extractUserEmail(user) === PRIMARY_ADMIN_EMAIL
+  );
+}
+
+export interface UpsertProfileResult {
+  role: 'admin' | 'user';
+  verifiedBadge: boolean;
+  blocked: boolean;
+  deleted: boolean;
+}
+
+export async function upsertUserProfile(user: User): Promise<UpsertProfileResult> {
   const uid = sanitizeId(user.uid);
   const path = `users/${uid}`;
   const userRef = doc(db, 'users', uid);
 
-  const displayName = (user.displayName || user.email?.split('@')[0] || 'Kreator').slice(0, 100);
+  const displayName = (user.displayName || extractUserEmail(user).split('@')[0] || 'Kreator').slice(
+    0,
+    100
+  );
+  const cleanEmail = extractUserEmail(user).slice(0, 200);
   const photoUrl = user.photoURL ? user.photoURL.slice(0, 500) : undefined;
+  const primaryAdmin = isPrimaryAdminUser(user);
 
   try {
     const snap = await getDoc(userRef);
     if (!snap.exists()) {
+      const role: 'admin' | 'user' = primaryAdmin ? 'admin' : 'user';
+      const verifiedBadge = primaryAdmin;
       const payload: Record<string, unknown> = {
         uid,
         displayName,
+        role,
+        verifiedBadge,
+        blocked: false,
+        deleted: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
+      if (cleanEmail) payload.email = cleanEmail;
       if (photoUrl) payload.photoUrl = photoUrl;
       await setDoc(userRef, payload);
-    } else {
-      const updates: Record<string, unknown> = {
-        displayName,
+
+      if (primaryAdmin) {
+        await ensurePrimaryAdminGrant(user);
+      }
+      return { role, verifiedBadge, blocked: false, deleted: false };
+    }
+
+    const existing = snap.data();
+    const blocked = existing.blocked === true;
+    const deleted = existing.deleted === true;
+    const role: 'admin' | 'user' =
+      primaryAdmin || existing.role === 'admin' ? 'admin' : 'user';
+    const verifiedBadge =
+      primaryAdmin || role === 'admin' || existing.verifiedBadge === true;
+
+    if (blocked || deleted) {
+      return { role: 'user', verifiedBadge: false, blocked, deleted };
+    }
+
+    const updates: Record<string, unknown> = {
+      displayName,
+      role,
+      verifiedBadge,
+      blocked: false,
+      deleted: false,
+      updatedAt: serverTimestamp(),
+    };
+    if (cleanEmail) updates.email = cleanEmail;
+    if (photoUrl) updates.photoUrl = photoUrl;
+    await updateDoc(userRef, updates);
+
+    if (primaryAdmin) {
+      await ensurePrimaryAdminGrant(user);
+    }
+
+    return { role, verifiedBadge, blocked: false, deleted: false };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+async function ensurePrimaryAdminGrant(user: User): Promise<void> {
+  const uid = sanitizeId(user.uid);
+  const adminRef = doc(db, 'admins', uid);
+  const path = `admins/${uid}`;
+  try {
+    const snap = await getDoc(adminRef);
+    if (!snap.exists()) {
+      await setDoc(adminRef, {
+        uid,
+        email: (user.email || PRIMARY_ADMIN_EMAIL).trim().toLowerCase().slice(0, 200),
+        grantedBy: uid,
+        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      };
-      if (photoUrl) updates.photoUrl = photoUrl;
-      await updateDoc(userRef, updates);
+      });
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);

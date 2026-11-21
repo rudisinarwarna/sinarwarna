@@ -1,22 +1,25 @@
 import {
   buildCorsHeaders,
-  createTimeoutSignal,
   getCloudflareGeminiClient,
   jsonResponse,
   type CfPagesContext,
 } from '../../../shared/cfHelpers.ts';
+import { runChatStreamWithTools } from '../../../shared/chatStreamRunner.ts';
+import { resolveServerAuthContext } from '../../../shared/firebaseServerAuth.ts';
 import {
   buildContents,
   formatGeminiError,
-  getChatAttempts,
-  isRateLimitError,
-  isTransientError,
-  MODE_INSTRUCTIONS,
   type IncomingMessage,
 } from '../../../shared/sinarWarnaPrompt.ts';
 
 export async function onRequestOptions(context: CfPagesContext): Promise<Response> {
   return new Response(null, { status: 204, headers: buildCorsHeaders(context.request) });
+}
+
+function extractBearerToken(headerValue: string | null): string | null {
+  if (!headerValue) return null;
+  const match = headerValue.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : null;
 }
 
 export async function onRequestPost(context: CfPagesContext): Promise<Response> {
@@ -32,6 +35,16 @@ export async function onRequestPost(context: CfPagesContext): Promise<Response> 
       return jsonResponse(context.request, { error: 'Pesan percakapan tidak boleh kosong.' }, 400);
     }
 
+    const bearerToken = extractBearerToken(context.request.headers.get('Authorization'));
+    const authContext = await resolveServerAuthContext(bearerToken);
+    if (authContext.isBlocked) {
+      return jsonResponse(
+        context.request,
+        { error: 'Akun Anda telah diblokir atau dihapus oleh Administrator Sinar Warna.' },
+        403
+      );
+    }
+
     const ai = getCloudflareGeminiClient(context.env);
     const contents = buildContents(messages);
     if (contents.length === 0) {
@@ -42,8 +55,6 @@ export async function onRequestPost(context: CfPagesContext): Promise<Response> 
       );
     }
 
-    const systemInstruction = MODE_INSTRUCTIONS[mode] || MODE_INSTRUCTIONS.general;
-    const attempts = getChatAttempts(thinkingDepth);
     const encoder = new TextEncoder();
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
     const writer = writable.getWriter();
@@ -52,62 +63,19 @@ export async function onRequestPost(context: CfPagesContext): Promise<Response> 
       try {
         await writer.write(encoder.encode(': connected\n\n'));
 
-        let activeIterator: AsyncIterator<
-          Awaited<ReturnType<typeof ai.models.generateContentStream>> extends AsyncIterable<infer T>
-            ? T
-            : never
-        > | null = null;
-        let firstResult: IteratorResult<
-          Awaited<ReturnType<typeof ai.models.generateContentStream>> extends AsyncIterable<infer T>
-            ? T
-            : never
-        > | null = null;
-        let lastErr: unknown;
-
-        for (const step of attempts) {
-          if (context.request.signal.aborted) break;
-          if (lastErr && isRateLimitError(lastErr) && step.model === attempts[0].model) {
-            continue;
-          }
-          const stepTimer = createTimeoutSignal(context.request.signal, step.timeoutMs);
-          try {
-            const stream = await ai.models.generateContentStream({
-              model: step.model,
-              contents,
-              config: {
-                systemInstruction,
-                thinkingConfig: { thinkingLevel: step.level },
-                abortSignal: stepTimer.signal,
-              },
-            });
-            const iterator = stream[Symbol.asyncIterator]();
-            const first = await iterator.next();
-            activeIterator = iterator;
-            firstResult = first;
-            stepTimer.cleanup();
-            break;
-          } catch (attemptErr) {
-            stepTimer.cleanup();
-            lastErr = attemptErr;
-            if (context.request.signal.aborted || !isTransientError(attemptErr)) {
-              throw attemptErr;
+        await runChatStreamWithTools({
+          ai,
+          contents,
+          mode,
+          thinkingDepth,
+          authContext,
+          abortSignal: context.request.signal,
+          onEvent: async (event) => {
+            if (!context.request.signal.aborted) {
+              await writer.write(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
             }
-          }
-        }
-
-        if (!activeIterator || !firstResult) {
-          throw lastErr || new Error('Gagal memulai aliran AI.');
-        }
-
-        let current = firstResult;
-        while (!current.done) {
-          if (context.request.signal.aborted) break;
-          const chunkText = current.value?.text;
-          if (chunkText) {
-            await writer.write(encoder.encode(`data: ${JSON.stringify({ text: chunkText })}\n\n`));
-          }
-          current = await activeIterator.next();
-        }
+          },
+        });
 
         if (!context.request.signal.aborted) {
           await writer.write(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));

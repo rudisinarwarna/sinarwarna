@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import type { User } from 'firebase/auth';
 import {
   AlertCircle,
   Mic,
@@ -19,6 +20,7 @@ interface LiveStudioModalProps {
   isOpen: boolean;
   initialCameraOn?: boolean;
   activeMode: CreativeModeId;
+  user: User | null;
   onClose: (transcriptLog?: Array<{ role: 'user' | 'model'; text: string }>) => void;
 }
 
@@ -35,7 +37,13 @@ const VOICE_OPTIONS: Array<{ id: VoicePersonaId; label: string }> = [
 interface TranscriptEntry {
   id: string;
   role: 'user' | 'model';
+  speakerLabel: string;
   text: string;
+  isOwieBarkTranslation?: boolean;
+}
+
+function getPersonaLabel(id: string | undefined): string {
+  return VOICE_OPTIONS.find((item) => item.id === id)?.label || 'Santi';
 }
 
 function downsampleTo16k(float32: Float32Array, inputSampleRate: number): Float32Array {
@@ -91,13 +99,16 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   isOpen,
   initialCameraOn = false,
   activeMode,
+  user,
   onClose,
 }) => {
   const [status, setStatus] = useState<'connecting' | 'listening' | 'speaking' | 'paused' | 'error'>(
     'connecting'
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [handoffNotice, setHandoffNotice] = useState<string | null>(null);
   const [voice, setVoice] = useState<VoicePersonaId>('santi');
+  const [connectTriggerVoice, setConnectTriggerVoice] = useState<VoicePersonaId>('santi');
   const [isMuted, setIsMuted] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(initialCameraOn);
@@ -117,6 +128,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const isMutedRef = useRef(isMuted);
   const isPausedRef = useRef(isPaused);
+  const voiceRef = useRef<VoicePersonaId>(voice);
   const transcriptsRef = useRef<TranscriptEntry[]>([]);
   const transcriptsEndRef = useRef<HTMLDivElement>(null);
 
@@ -127,6 +139,10 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   useEffect(() => {
     isPausedRef.current = isPaused;
   }, [isPaused]);
+
+  useEffect(() => {
+    voiceRef.current = voice;
+  }, [voice]);
 
   useEffect(() => {
     setIsCameraOn(initialCameraOn);
@@ -206,23 +222,41 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     }
   }, [stopCameraStream, stopPlaybackQueue]);
 
-  const appendTranscriptChunk = useCallback((role: 'user' | 'model', chunk: string) => {
-    if (!chunk) return;
-    setTranscripts((prev) => {
-      const last = prev[prev.length - 1];
-      if (last && last.role === role) {
-        return [...prev.slice(0, -1), { ...last, text: `${last.text}${chunk}` }];
-      }
-      return [
-        ...prev,
-        {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          role,
-          text: chunk,
-        },
-      ];
-    });
-  }, []);
+  const appendTranscriptChunk = useCallback(
+    (
+      role: 'user' | 'model',
+      chunk: string,
+      options?: { speakerLabel?: string; completeEntry?: boolean; isOwieBarkTranslation?: boolean }
+    ) => {
+      if (!chunk) return;
+      const speakerLabel =
+        options?.speakerLabel || (role === 'user' ? 'Anda' : getPersonaLabel(voiceRef.current));
+
+      setTranscripts((prev) => {
+        const last = prev[prev.length - 1];
+        if (
+          !options?.completeEntry &&
+          last &&
+          last.role === role &&
+          last.speakerLabel === speakerLabel &&
+          !last.isOwieBarkTranslation
+        ) {
+          return [...prev.slice(0, -1), { ...last, text: `${last.text}${chunk}` }];
+        }
+        return [
+          ...prev,
+          {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            role,
+            speakerLabel,
+            text: chunk,
+            isOwieBarkTranslation: options?.isOwieBarkTranslation,
+          },
+        ];
+      });
+    },
+    []
+  );
 
   const playAudioChunk24k = useCallback((base64Audio: string) => {
     const outCtx = outputAudioCtxRef.current;
@@ -263,6 +297,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     if (!isOpen) {
       cleanupSession();
       setTranscripts([]);
+      setHandoffNotice(null);
       setIsMuted(false);
       setIsPaused(false);
       return;
@@ -271,6 +306,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     let cancelled = false;
     setStatus('connecting');
     setErrorMessage(null);
+    setHandoffNotice(null);
 
     async function initLive() {
       cleanupSession();
@@ -297,7 +333,10 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         inputAudioCtxRef.current = inputCtx;
         outputAudioCtxRef.current = outputCtx;
 
-        const wsUrl = buildLiveWsUrl(voice, activeMode);
+        const idToken = await user?.getIdToken().catch(() => null);
+        if (cancelled) return;
+
+        const wsUrl = buildLiveWsUrl(connectTriggerVoice, activeMode, idToken);
 
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
@@ -307,17 +346,42 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           try {
             const msg = JSON.parse(String(event.data)) as {
               ready?: boolean;
+              voice?: VoicePersonaId;
+              switchingVoice?: VoicePersonaId;
+              switchedVoiceReady?: VoicePersonaId;
+              handoffNotice?: string;
               audio?: string;
               inputTranscript?: string;
               outputTranscript?: string;
+              fromOwieCaption?: boolean;
               interrupted?: boolean;
               turnComplete?: boolean;
               error?: string;
             };
 
             if (msg.ready) {
+              if (msg.voice) {
+                voiceRef.current = msg.voice;
+                setVoice(msg.voice);
+              }
               setStatus(isPausedRef.current ? 'paused' : 'listening');
             }
+
+            if (msg.switchingVoice) {
+              voiceRef.current = msg.switchingVoice;
+              setVoice(msg.switchingVoice);
+              setHandoffNotice(
+                msg.handoffNotice || `Memanggil ${getPersonaLabel(msg.switchingVoice)}...`
+              );
+            }
+
+            if (msg.switchedVoiceReady) {
+              setHandoffNotice(null);
+              if (activeSourcesRef.current.size === 0 && !isPausedRef.current) {
+                setStatus('listening');
+              }
+            }
+
             if (msg.error) {
               setErrorMessage(msg.error);
               setStatus('error');
@@ -331,10 +395,15 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
               playAudioChunk24k(msg.audio);
             }
             if (msg.inputTranscript) {
-              appendTranscriptChunk('user', msg.inputTranscript);
+              appendTranscriptChunk('user', msg.inputTranscript, { speakerLabel: 'Anda' });
             }
             if (msg.outputTranscript) {
-              appendTranscriptChunk('model', msg.outputTranscript);
+              const speakerId = msg.voice || voiceRef.current;
+              appendTranscriptChunk('model', msg.outputTranscript, {
+                speakerLabel: getPersonaLabel(speakerId),
+                completeEntry: Boolean(msg.fromOwieCaption),
+                isOwieBarkTranslation: Boolean(msg.fromOwieCaption),
+              });
             }
             if (msg.turnComplete && activeSourcesRef.current.size === 0 && !isPausedRef.current) {
               setStatus('listening');
@@ -402,10 +471,11 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     activeMode,
     appendTranscriptChunk,
     cleanupSession,
+    connectTriggerVoice,
     isOpen,
     playAudioChunk24k,
     stopPlaybackQueue,
-    voice,
+    user,
   ]);
 
   useEffect(() => {
@@ -478,6 +548,19 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     };
   }, [facingMode, isCameraOn, isOpen, stopCameraStream]);
 
+  const handleManualVoiceSelect = (nextVoice: VoicePersonaId) => {
+    if (nextVoice === voice) return;
+    setVoice(nextVoice);
+    voiceRef.current = nextVoice;
+    const activeWs = wsRef.current;
+    if (activeWs && activeWs.readyState === WebSocket.OPEN) {
+      setHandoffNotice(`Memanggil ${getPersonaLabel(nextVoice)}...`);
+      activeWs.send(JSON.stringify({ switchVoice: nextVoice }));
+    } else {
+      setConnectTriggerVoice(nextVoice);
+    }
+  };
+
   const handleTogglePause = () => {
     setIsPaused((prev) => {
       const next = !prev;
@@ -492,16 +575,17 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   };
 
   const handleEndCall = () => {
-    const captured = transcriptsRef.current.map((t) => ({ role: t.role, text: t.text }));
+    const captured = transcriptsRef.current.map((t) => ({
+      role: t.role,
+      text: t.role === 'model' ? `[${t.speakerLabel}] ${t.text}` : t.text,
+    }));
     cleanupSession();
     onClose(captured.length > 0 ? captured : undefined);
   };
 
   if (!isOpen) return null;
 
-  const activeVoiceLabel =
-    VOICE_OPTIONS.find((item) => item.id === voice)?.label || 'Santi';
-
+  const activeVoiceLabel = getPersonaLabel(voice);
   const micScale = status === 'listening' ? 1 + micEnergy * 0.16 : 1;
 
   return (
@@ -525,7 +609,6 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-52 bg-gradient-to-t from-black/85 via-black/45 to-transparent" />
         </div>
       ) : (
-        /* Vivid Red & Blue collaborative ambient studio backdrop */
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 overflow-hidden"
@@ -575,7 +658,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
             <select
               id="live-voice-select"
               value={voice}
-              onChange={(e) => setVoice(e.target.value as VoicePersonaId)}
+              onChange={(e) => handleManualVoiceSelect(e.target.value as VoicePersonaId)}
               className="bg-transparent text-xs font-semibold text-white focus:outline-none cursor-pointer"
             >
               {VOICE_OPTIONS.map((v) => (
@@ -591,16 +674,21 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
       {/* Center Stage */}
       <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-end sm:justify-center px-4 py-2">
         {errorMessage && (
-          <div className="mb-4 flex max-w-md items-center gap-2.5 rounded-2xl border border-red-500/40 bg-red-950/75 px-4 py-3 text-xs text-red-200 backdrop-blur-md">
+          <div className="mb-3 flex max-w-md items-center gap-2.5 rounded-2xl border border-red-500/40 bg-red-950/75 px-4 py-3 text-xs text-red-200 backdrop-blur-md">
             <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
             <span>{errorMessage}</span>
           </div>
         )}
 
+        {handoffNotice && !errorMessage && (
+          <div className="mb-3 rounded-full border border-blue-400/40 bg-blue-950/75 px-4 py-1.5 text-xs font-medium text-blue-100 backdrop-blur-md">
+            {handoffNotice}
+          </div>
+        )}
+
         {!isCameraOn ? (
-          <div className="my-auto flex flex-col items-center justify-center gap-6 py-4">
-            {/* Huge background-less animated Sinar Warna logo */}
-            <div className="relative flex h-56 w-56 items-center justify-center sm:h-68 sm:w-68">
+          <div className="my-auto flex flex-col items-center justify-center gap-5 py-3">
+            <div className="relative flex h-52 w-52 items-center justify-center sm:h-64 sm:w-64">
               <div
                 style={{
                   transform: `scale(${status === 'speaking' ? 1.24 : 0.96 + micEnergy * 0.28})`,
@@ -626,7 +714,10 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
               {status === 'listening' && micEnergy > 0.08 && (
                 <div
                   aria-hidden="true"
-                  style={{ transform: `scale(${1 + micEnergy * 0.35})`, opacity: Math.min(0.65, micEnergy) }}
+                  style={{
+                    transform: `scale(${1 + micEnergy * 0.35})`,
+                    opacity: Math.min(0.65, micEnergy),
+                  }}
                   className="pointer-events-none absolute inset-6 rounded-full border border-blue-400/50 transition-transform duration-100"
                 />
               )}
@@ -645,7 +736,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
                   src="/assets/sinar-warna-logo.png"
                   alt="Sinar Warna Live"
                   referrerPolicy="no-referrer"
-                  className={`h-40 w-auto sm:h-52 object-contain select-none transition-[filter] duration-200 ${
+                  className={`h-36 w-auto sm:h-48 object-contain select-none transition-[filter] duration-200 ${
                     status === 'speaking'
                       ? 'drop-shadow-[0_0_32px_rgba(10,54,255,0.65)]'
                       : 'drop-shadow-[0_0_20px_rgba(229,29,43,0.35)]'
@@ -657,15 +748,18 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
             <div className="space-y-1.5 text-center px-3">
               <p className="font-display text-lg font-semibold text-white sm:text-xl">
                 {status === 'connecting' && `Menghubungkan ${activeVoiceLabel}...`}
-                {status === 'listening' && 'Silakan berbicara...'}
-                {status === 'speaking' && `${activeVoiceLabel} sedang berbicara`}
+                {status === 'listening' && `Terhubung dengan ${activeVoiceLabel} · Silakan berbicara...`}
+                {status === 'speaking' &&
+                  (voice === 'owie'
+                    ? 'Owie sedang menggonggong (baca teks di bawah)'
+                    : `${activeVoiceLabel} sedang berbicara`)}
                 {status === 'paused' && 'Sesi Live dijeda'}
                 {status === 'error' && 'Koneksi terputus'}
               </p>
               <p className="text-xs text-zinc-400 max-w-xs mx-auto">
                 {isMuted
                   ? 'Mikrofon dibisukan · Ketuk ikon mikrofon untuk berbicara'
-                  : 'Ketuk ikon kamera kapan saja agar AI melihat objek langsung'}
+                  : 'Anda bisa minta memanggil Santi, Cynthia, Awen, Cyndi, atau Owie kapan saja'}
               </p>
             </div>
           </div>
@@ -673,24 +767,28 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           <div className="mb-2 text-center">
             <p className="inline-block rounded-full bg-black/50 px-3.5 py-1.5 text-xs font-medium text-zinc-100 backdrop-blur-md">
               {status === 'connecting' && `Menghubungkan kamera ke ${activeVoiceLabel}...`}
-              {status === 'listening' && 'Kamera aktif · Silakan berbicara'}
-              {status === 'speaking' && `${activeVoiceLabel} sedang berbicara...`}
+              {status === 'listening' && `Kamera aktif (${activeVoiceLabel}) · Silakan berbicara`}
+              {status === 'speaking' &&
+                (voice === 'owie'
+                  ? 'Owie sedang menggonggong (baca teks di bawah)'
+                  : `${activeVoiceLabel} sedang berbicara...`)}
               {status === 'paused' && 'Sesi Live dijeda'}
             </p>
           </div>
         )}
 
-        {/* Real-time Live Transcripts */}
+        {/* Real-time Live Transcripts (shows readable Indonesian translations for Owie's barks!) */}
         {transcripts.length > 0 && (
-          <div className="mt-2 w-full max-w-xl max-h-24 sm:max-h-28 overflow-y-auto rounded-2xl border border-white/15 bg-black/45 px-4 py-2.5 text-xs space-y-1.5 backdrop-blur-md">
-            {transcripts.slice(-4).map((item) => (
+          <div className="mt-2 w-full max-w-xl max-h-28 sm:max-h-32 overflow-y-auto rounded-2xl border border-white/15 bg-black/55 px-4 py-2.5 text-xs space-y-1.5 backdrop-blur-md">
+            {transcripts.slice(-6).map((item) => (
               <p key={item.id} className="leading-relaxed text-zinc-100">
                 <span
                   className={`font-semibold mr-1.5 ${
                     item.role === 'user' ? 'text-[#FF4D5A]' : 'text-[#60A5FA]'
                   }`}
                 >
-                  {item.role === 'user' ? 'Anda:' : `${activeVoiceLabel}:`}
+                  {item.speakerLabel}
+                  {item.isOwieBarkTranslation ? ' (Arti Gonggongan)' : ''}:
                 </span>
                 <span>{item.text}</span>
               </p>

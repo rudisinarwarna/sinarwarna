@@ -1,9 +1,7 @@
-import { Modality, type GoogleGenAI, type LiveServerMessage } from '@google/genai';
 import { getCloudflareGeminiClient, type CfPagesContext } from '../shared/cfHelpers.ts';
-import {
-  buildLivePersonaSessionConfig,
-  formatGeminiError,
-} from '../shared/sinarWarnaPrompt.ts';
+import { resolveServerAuthContext } from '../shared/firebaseServerAuth.ts';
+import { createLiveBridge, type LiveClientMessage } from '../shared/liveSessionManager.ts';
+import { formatGeminiError } from '../shared/sinarWarnaPrompt.ts';
 
 interface CfWebSocket extends WebSocket {
   accept(): void;
@@ -27,14 +25,11 @@ export async function onRequestGet(context: CfPagesContext): Promise<Response> {
   const urlObj = new URL(context.request.url);
   const rawVoice = urlObj.searchParams.get('voice') || 'santi';
   const mode = urlObj.searchParams.get('mode') || 'general';
-  const { voiceName, liveSystemInstruction, greetingPrompt } = buildLivePersonaSessionConfig(
-    rawVoice,
-    mode
-  );
+  const token = urlObj.searchParams.get('token');
 
-  let session: Awaited<ReturnType<GoogleGenAI['live']['connect']>> | null = null;
+  let bridge: ReturnType<typeof createLiveBridge> | null = null;
   let closedByClient = false;
-  const pendingInputs: Array<{ audio?: string; video?: string; text?: string }> = [];
+  const earlyMessages: LiveClientMessage[] = [];
 
   let resolveDone: () => void = () => {};
   const donePromise = new Promise<void>((res) => {
@@ -50,44 +45,27 @@ export async function onRequestGet(context: CfPagesContext): Promise<Response> {
     }
   };
 
-  const forwardInputToSession = (
-    activeSession: NonNullable<typeof session>,
-    msg: { audio?: string; video?: string; text?: string }
-  ) => {
-    if (msg.audio) {
-      activeSession.sendRealtimeInput({
-        audio: { data: msg.audio, mimeType: 'audio/pcm;rate=16000' },
-      });
-    }
-    if (msg.video) {
-      activeSession.sendRealtimeInput({
-        video: { data: msg.video, mimeType: 'image/jpeg' },
-      });
-    }
-    if (msg.text) {
-      activeSession.sendRealtimeInput({ text: msg.text });
+  const safeClose = () => {
+    if (!closedByClient && serverWs.readyState === 1) {
+      try {
+        serverWs.close();
+      } catch {
+        // Ignore close error
+      }
     }
   };
 
   serverWs.addEventListener('close', () => {
     closedByClient = true;
-    try {
-      session?.close();
-    } catch {
-      // Ignore close error
-    }
-    session = null;
+    bridge?.close();
+    bridge = null;
     resolveDone();
   });
 
   serverWs.addEventListener('error', () => {
     closedByClient = true;
-    try {
-      session?.close();
-    } catch {
-      // Ignore close error
-    }
-    session = null;
+    bridge?.close();
+    bridge = null;
     resolveDone();
   });
 
@@ -95,14 +73,14 @@ export async function onRequestGet(context: CfPagesContext): Promise<Response> {
     if (closedByClient) return;
     try {
       const raw = typeof event.data === 'string' ? event.data : String(event.data);
-      const msg = JSON.parse(raw) as { audio?: string; video?: string; text?: string };
-      if (!session) {
-        if (pendingInputs.length < 30) {
-          pendingInputs.push(msg);
+      const msg = JSON.parse(raw) as LiveClientMessage;
+      if (!bridge) {
+        if (earlyMessages.length < 30) {
+          earlyMessages.push(msg);
         }
         return;
       }
-      forwardInputToSession(session, msg);
+      bridge.handleClientMessage(msg);
     } catch {
       // Ignore malformed message
     }
@@ -110,88 +88,38 @@ export async function onRequestGet(context: CfPagesContext): Promise<Response> {
 
   const runLive = (async () => {
     try {
-      const ai = getCloudflareGeminiClient(context.env, 'v1beta');
-      session = await ai.live.connect({
-        model: 'gemini-3.8-live',
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName } },
-          },
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-          systemInstruction: liveSystemInstruction,
-        },
-        callbacks: {
-          onopen: () => {
-            safeSend({ ready: true });
-          },
-          onmessage: (message: LiveServerMessage) => {
-            if (closedByClient || serverWs.readyState !== 1) return;
-            const content = message.serverContent;
-            if (content?.inputTranscription?.text) {
-              safeSend({ inputTranscript: content.inputTranscription.text });
-            }
-            if (content?.outputTranscription?.text) {
-              safeSend({ outputTranscript: content.outputTranscription.text });
-            }
-            for (const part of content?.modelTurn?.parts ?? []) {
-              if (part.inlineData?.data) {
-                safeSend({ audio: part.inlineData.data });
-              }
-            }
-            if (content?.interrupted) {
-              safeSend({ interrupted: true });
-            }
-            if (content?.turnComplete) {
-              safeSend({ turnComplete: true });
-            }
-          },
-          onerror: (errEvent: unknown) => {
-            const ev = errEvent as { message?: string; error?: { message?: string } };
-            const detail = ev?.error?.message || ev?.message || String(errEvent);
-            safeSend({
-              error: `Koneksi Gemini Live mengalami gangguan (${detail}). Silakan coba sambungkan ulang.`,
-            });
-          },
-          onclose: (closeEvent: unknown) => {
-            const ce = closeEvent as { code?: number; reason?: string };
-            if (ce?.code && ce.code !== 1000) {
-              safeSend({
-                error: `Sesi Gemini Live ditutup (${ce.code}${ce.reason ? `: ${ce.reason}` : ''}).`,
-              });
-            }
-            if (!closedByClient && serverWs.readyState === 1) {
-              try {
-                serverWs.close();
-              } catch {
-                // Ignore close error
-              }
-            }
-            resolveDone();
-          },
-        },
-      });
-
+      const authContext = await resolveServerAuthContext(token);
       if (closedByClient) {
-        session.close();
         resolveDone();
         return;
       }
 
-      try {
-        session.sendClientContent({
-          turns: [{ role: 'user', parts: [{ text: greetingPrompt }] }],
-          turnComplete: true,
+      if (authContext.isBlocked) {
+        safeSend({
+          error: 'Akun Anda telah diblokir atau dihapus oleh Administrator Sinar Warna.',
         });
-      } catch {
-        // Non-fatal greeting error
+        safeClose();
+        resolveDone();
+        return;
       }
 
-      while (pendingInputs.length > 0 && session && !closedByClient) {
-        const queued = pendingInputs.shift();
+      const ai = getCloudflareGeminiClient(context.env, 'v1beta');
+      bridge = createLiveBridge({
+        ai,
+        initialVoice: rawVoice,
+        mode,
+        authContext,
+        sendJson: safeSend,
+        closeClient: safeClose,
+        onDone: resolveDone,
+      });
+
+      await bridge.start();
+
+      while (earlyMessages.length > 0 && bridge && !closedByClient) {
+        const queued = earlyMessages.shift();
         if (queued) {
-          forwardInputToSession(session, queued);
+          bridge.handleClientMessage(queued);
         }
       }
 
@@ -199,13 +127,7 @@ export async function onRequestGet(context: CfPagesContext): Promise<Response> {
     } catch (err) {
       const { message } = formatGeminiError(err);
       safeSend({ error: message });
-      if (!closedByClient && serverWs.readyState === 1) {
-        try {
-          serverWs.close();
-        } catch {
-          // Ignore close error
-        }
-      }
+      safeClose();
       resolveDone();
     }
   })();

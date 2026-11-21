@@ -2,7 +2,7 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "Authenticated user studio profile metadata without sensitive PII fields.",
+      "description": "Authenticated user profile and access control status.",
       "type": "object",
       "properties": {
         "uid": {
@@ -16,12 +16,35 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 100,
-          "description": "User display name from Google profile."
+          "description": "User display name."
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "User email address (restricted to owner and admins)."
         },
         "photoUrl": {
           "type": "string",
           "maxLength": 500,
           "description": "Optional profile avatar URL."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "admin"],
+          "maxLength": 16,
+          "description": "Authorization role."
+        },
+        "verifiedBadge": {
+          "type": "boolean",
+          "description": "Blue verified checkmark granted only to admins or by admins."
+        },
+        "blocked": {
+          "type": "boolean",
+          "description": "Whether account access is blocked by an admin."
+        },
+        "deleted": {
+          "type": "boolean",
+          "description": "Whether account was deleted by an admin."
         },
         "createdAt": {
           "type": "string",
@@ -34,7 +57,111 @@
           "description": "Server timestamp when profile was last updated."
         }
       },
-      "required": ["uid", "displayName", "createdAt", "updatedAt"]
+      "required": ["uid", "displayName", "role", "blocked", "deleted", "createdAt", "updatedAt"]
+    },
+    "AdminGrant": {
+      "title": "AdminGrant",
+      "description": "Verified administrator role assignment record.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the admin."
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Email address of the admin."
+        },
+        "grantedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "UID of the admin who granted the role."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "grantedBy", "createdAt", "updatedAt"]
+    },
+    "AdminMemory": {
+      "title": "AdminMemory",
+      "description": "Shared private AI memory visible exclusively to authenticated admins.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique memory identifier."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Short topic label for the private memory."
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "Private memory fact known across all admins."
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "UID of the admin or seed script that recorded this memory."
+        },
+        "createdByEmail": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Optional email of the admin who added this memory."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "title", "content", "createdBy", "createdAt", "updatedAt"]
+    },
+    "AdminSeedMeta": {
+      "title": "AdminSeedMeta",
+      "description": "Tracks one-time initialization of default private memories.",
+      "type": "object",
+      "properties": {
+        "seededDefaultMemories": {
+          "type": "boolean"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["seededDefaultMemories", "updatedBy", "createdAt", "updatedAt"]
     },
     "Conversation": {
       "title": "Conversation",
@@ -138,7 +265,19 @@
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
-      "description": "Per-user studio profile document, readable and writable only by its owner."
+      "description": "Per-user profile, readable/writable by owner (limited fields) and managed by verified admins."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminGrant" },
+      "description": "Verified administrator registry managed by admins."
+    },
+    "/adminMemories/{memoryId}": {
+      "schema": { "$ref": "#/entities/AdminMemory" },
+      "description": "Shared private AI memories visible and writable exclusively by admins."
+    },
+    "/adminMeta/{docId}": {
+      "schema": { "$ref": "#/entities/AdminSeedMeta" },
+      "description": "Admin-only seed status document."
     },
     "/conversations/{conversationId}": {
       "schema": { "$ref": "#/entities/Conversation" },

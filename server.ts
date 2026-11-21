@@ -5,20 +5,14 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
-import {
-  GoogleGenAI,
-  Modality,
-  ThinkingLevel,
-  type LiveServerMessage,
-} from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { runChatStreamWithTools } from './shared/chatStreamRunner.ts';
+import { resolveServerAuthContext } from './shared/firebaseServerAuth.ts';
+import { createLiveBridge, type LiveClientMessage } from './shared/liveSessionManager.ts';
 import {
   buildContents,
-  buildLivePersonaSessionConfig,
   formatGeminiError,
-  getChatAttempts,
-  isRateLimitError,
   isTransientError,
-  MODE_INSTRUCTIONS,
   type IncomingMessage,
 } from './shared/sinarWarnaPrompt.ts';
 
@@ -46,24 +40,10 @@ function getGeminiClient(): GoogleGenAI {
   });
 }
 
-// Shared prompts, personas, and Gemini error/content helpers imported from ./shared/sinarWarnaPrompt.ts
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
+function extractBearerToken(headerValue: string | undefined): string | null {
+  if (!headerValue || typeof headerValue !== 'string') return null;
+  const match = headerValue.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : null;
 }
 
 async function createApp() {
@@ -106,6 +86,15 @@ async function createApp() {
         return;
       }
 
+      const bearerToken = extractBearerToken(req.headers.authorization);
+      const authContext = await resolveServerAuthContext(bearerToken);
+      if (authContext.isBlocked) {
+        res.status(403).json({
+          error: 'Akun Anda telah diblokir atau dihapus oleh Administrator Sinar Warna.',
+        });
+        return;
+      }
+
       const ai = getGeminiClient();
       const contents = buildContents(messages);
       if (contents.length === 0) {
@@ -113,79 +102,32 @@ async function createApp() {
         return;
       }
 
-      const systemInstruction = MODE_INSTRUCTIONS[mode] || MODE_INSTRUCTIONS.general;
-      const thinkingLevel =
-        thinkingDepth === 'deep' ? ThinkingLevel.HIGH : ThinkingLevel.LOW;
-
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, no-transform');
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders?.();
       res.write(': connected\n\n');
 
-      const primaryModel = 'gemini-4-hydrogen';
-      let activeIterator: AsyncIterator<Awaited<ReturnType<typeof ai.models.generateContentStream>> extends AsyncIterable<infer T> ? T : never> | null = null;
-      let firstResult: IteratorResult<Awaited<ReturnType<typeof ai.models.generateContentStream>> extends AsyncIterable<infer T> ? T : never> | null = null;
-      let lastErr: unknown;
-
-      const attempts = getChatAttempts(thinkingDepth);
-
-      for (const step of attempts) {
-        if (abortController.signal.aborted) break;
-        if (lastErr && isRateLimitError(lastErr) && step.model === primaryModel) {
-          continue;
-        }
-        try {
-          const stepSignal = AbortSignal.any([
-            abortController.signal,
-            AbortSignal.timeout(step.timeoutMs),
-          ]);
-          const stream = await ai.models.generateContentStream({
-            model: step.model,
-            contents,
-            config: {
-              systemInstruction,
-              thinkingConfig: { thinkingLevel: step.level },
-              abortSignal: stepSignal,
-            },
-          });
-          const iterator = stream[Symbol.asyncIterator]();
-          const first = await iterator.next();
-          activeIterator = iterator;
-          firstResult = first;
-          break;
-        } catch (attemptErr) {
-          lastErr = attemptErr;
-          if (abortController.signal.aborted || !isTransientError(attemptErr)) {
-            throw attemptErr;
+      await runChatStreamWithTools({
+        ai,
+        contents,
+        mode,
+        thinkingDepth,
+        authContext,
+        abortSignal: abortController.signal,
+        onEvent: (event) => {
+          if (!abortController.signal.aborted && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify(event)}\n\n`);
           }
-          console.warn(
-            `[Sinar Warna /api/chat/stream] Fallback from ${step.model}:`,
-            (attemptErr as Error)?.name || (attemptErr as Error)?.message
-          );
-        }
-      }
+        },
+      });
 
-      if (!activeIterator || !firstResult) {
-        throw lastErr || new Error('Gagal memulai aliran AI.');
-      }
-
-      let current = firstResult;
-      while (!current.done) {
-        if (abortController.signal.aborted) {
-          break;
-        }
-        const chunkText = current.value?.text;
-        if (chunkText) {
-          res.write(`data: ${JSON.stringify({ text: chunkText })}\n\n`);
-        }
-        current = await activeIterator.next();
-      }
-
-      if (!abortController.signal.aborted) {
+      if (!abortController.signal.aborted && !res.writableEnded) {
         res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
       }
-      res.end();
+      if (!res.writableEnded) {
+        res.end();
+      }
     } catch (err) {
       if (abortController.signal.aborted && (err as Error)?.name === 'AbortError') {
         if (!res.writableEnded) {
@@ -284,28 +226,61 @@ async function createApp() {
   });
 
   wss.on('connection', async (clientWs: WebSocket, req: http.IncomingMessage) => {
-    let session: Awaited<ReturnType<GoogleGenAI['live']['connect']>> | null = null;
-    let closedByClient = false;
-
     const urlObj = new URL(req.url || '/live', 'http://localhost');
     const rawVoice = urlObj.searchParams.get('voice') || 'santi';
     const mode = urlObj.searchParams.get('mode') || 'general';
-    const { voiceName, liveSystemInstruction, greetingPrompt } = buildLivePersonaSessionConfig(
-      rawVoice,
-      mode
-    );
+    const token = urlObj.searchParams.get('token');
+
+    let bridge: ReturnType<typeof createLiveBridge> | null = null;
+    let closedByClient = false;
+
+    const safeSend = (payload: unknown) => {
+      if (closedByClient || clientWs.readyState !== clientWs.OPEN) return;
+      try {
+        clientWs.send(JSON.stringify(payload));
+      } catch {
+        // Ignore send error
+      }
+    };
+
+    const safeClose = () => {
+      if (!closedByClient && clientWs.readyState === clientWs.OPEN) {
+        try {
+          clientWs.close();
+        } catch {
+          // Ignore close error
+        }
+      }
+    };
 
     clientWs.on('close', () => {
       closedByClient = true;
+      bridge?.close();
+      bridge = null;
+    });
+
+    clientWs.on('message', (raw) => {
+      if (closedByClient) return;
       try {
-        session?.close();
-      } catch {
-        // Ignore close errors
+        const msg = JSON.parse(raw.toString()) as LiveClientMessage;
+        bridge?.handleClientMessage(msg);
+      } catch (err) {
+        console.error('[Sinar Warna Live Input Parse Error]', err);
       }
-      session = null;
     });
 
     try {
+      const authContext = await resolveServerAuthContext(token);
+      if (closedByClient) return;
+
+      if (authContext.isBlocked) {
+        safeSend({
+          error: 'Akun Anda telah diblokir atau dihapus oleh Administrator Sinar Warna.',
+        });
+        safeClose();
+        return;
+      }
+
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
         throw Object.assign(
@@ -313,6 +288,7 @@ async function createApp() {
           { status: 400 }
         );
       }
+
       const ai = new GoogleGenAI({
         apiKey,
         httpOptions: {
@@ -322,126 +298,22 @@ async function createApp() {
           },
         },
       });
-      session = await ai.live.connect({
-        model: 'gemini-3.8-live',
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName } },
-          },
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-          systemInstruction: liveSystemInstruction,
-        },
-        callbacks: {
-          onopen: () => {
-            if (!closedByClient && clientWs.readyState === clientWs.OPEN) {
-              clientWs.send(JSON.stringify({ ready: true }));
-            }
-          },
-          onmessage: (message: LiveServerMessage) => {
-            if (closedByClient || clientWs.readyState !== clientWs.OPEN) return;
 
-            const content = message.serverContent;
-            if (content?.inputTranscription?.text) {
-              clientWs.send(
-                JSON.stringify({ inputTranscript: content.inputTranscription.text })
-              );
-            }
-            if (content?.outputTranscription?.text) {
-              clientWs.send(
-                JSON.stringify({ outputTranscript: content.outputTranscription.text })
-              );
-            }
-            for (const part of content?.modelTurn?.parts ?? []) {
-              if (part.inlineData?.data) {
-                clientWs.send(JSON.stringify({ audio: part.inlineData.data }));
-              }
-            }
-            if (content?.interrupted) {
-              clientWs.send(JSON.stringify({ interrupted: true }));
-            }
-            if (content?.turnComplete) {
-              clientWs.send(JSON.stringify({ turnComplete: true }));
-            }
-          },
-          onerror: (errEvent: unknown) => {
-            const ev = errEvent as { message?: string; error?: { message?: string } };
-            const detail = ev?.error?.message || ev?.message || String(errEvent);
-            console.error('[Sinar Warna Live API Error]', detail, errEvent);
-            if (!closedByClient && clientWs.readyState === clientWs.OPEN) {
-              clientWs.send(
-                JSON.stringify({
-                  error: `Koneksi Gemini Live mengalami gangguan (${detail}). Silakan coba sambungkan ulang.`,
-                })
-              );
-            }
-          },
-          onclose: (closeEvent: unknown) => {
-            const ce = closeEvent as { code?: number; reason?: string };
-            if (ce?.code && ce.code !== 1000) {
-              console.error('[Sinar Warna Live API Close]', ce.code, ce.reason);
-              if (!closedByClient && clientWs.readyState === clientWs.OPEN) {
-                clientWs.send(
-                  JSON.stringify({
-                    error: `Sesi Gemini Live ditutup (${ce.code}${ce.reason ? `: ${ce.reason}` : ''}).`,
-                  })
-                );
-              }
-            }
-            if (!closedByClient && clientWs.readyState === clientWs.OPEN) {
-              clientWs.close();
-            }
-          },
-        },
+      bridge = createLiveBridge({
+        ai,
+        initialVoice: rawVoice,
+        mode,
+        authContext,
+        sendJson: safeSend,
+        closeClient: safeClose,
       });
 
-      if (closedByClient) {
-        session.close();
-        return;
-      }
-
-      try {
-        session.sendClientContent({
-          turns: [{ role: 'user', parts: [{ text: greetingPrompt }] }],
-          turnComplete: true,
-        });
-      } catch (greetErr) {
-        console.error('[Sinar Warna Live Greeting Error]', greetErr);
-      }
-
-      clientWs.on('message', (raw) => {
-        if (!session || closedByClient) return;
-        try {
-          const msg = JSON.parse(raw.toString()) as {
-            audio?: string;
-            video?: string;
-            text?: string;
-          };
-          if (msg.audio) {
-            session.sendRealtimeInput({
-              audio: { data: msg.audio, mimeType: 'audio/pcm;rate=16000' },
-            });
-          }
-          if (msg.video) {
-            session.sendRealtimeInput({
-              video: { data: msg.video, mimeType: 'image/jpeg' },
-            });
-          }
-          if (msg.text) {
-            session.sendRealtimeInput({ text: msg.text });
-          }
-        } catch (err) {
-          console.error('[Sinar Warna Live Input Parse Error]', err);
-        }
-      });
+      await bridge.start();
     } catch (err) {
       console.error('[Sinar Warna Live Connect Error]', err);
       const { message } = formatGeminiError(err);
-      if (clientWs.readyState === clientWs.OPEN) {
-        clientWs.send(JSON.stringify({ error: message }));
-        clientWs.close();
-      }
+      safeSend({ error: message });
+      safeClose();
     }
   });
 

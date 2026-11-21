@@ -17,8 +17,15 @@ export function buildApiUrl(path: string): string {
   return origin ? `${origin}${normalizedPath}` : normalizedPath;
 }
 
-export function buildLiveWsUrl(voice: string, mode: string): string {
-  const query = `voice=${encodeURIComponent(voice)}&mode=${encodeURIComponent(mode)}`;
+export function buildLiveWsUrl(voice: string, mode: string, idToken?: string | null): string {
+  const params = new URLSearchParams({
+    voice,
+    mode,
+  });
+  if (idToken) {
+    params.set('token', idToken);
+  }
+  const query = params.toString();
   const origin = getBackendHttpOrigin();
   if (origin) {
     const wsOrigin = origin.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:');

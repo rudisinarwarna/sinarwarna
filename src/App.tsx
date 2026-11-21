@@ -9,10 +9,13 @@ import {
   PanelLeftOpen,
   Plus,
   RefreshCw,
+  ShieldCheck,
   Sun,
   X,
 } from 'lucide-react';
+import { AdminModal } from './components/AdminModal';
 import { AuthScreen } from './components/AuthScreen';
+import { VerifiedBlueBadge } from './components/VerifiedBlueBadge';
 import { CameraCaptureModal } from './components/CameraCaptureModal';
 import {
   InstallAppPrompt,
@@ -37,8 +40,14 @@ import {
   signOutUser,
 } from './firebase';
 import {
+  seedDefaultAdminMemoriesOnce,
+  subscribeOwnUserAccess,
+} from './services/adminService';
+import {
   createConversationDoc,
   deleteConversationWithMessages,
+  isPrimaryAdminUser,
+  isUserVerifiedAccount,
   saveMessageDoc,
   subscribeConversations,
   subscribeMessages,
@@ -140,6 +149,9 @@ export default function App() {
   const [liveModalOpen, setLiveModalOpen] = useState<boolean>(false);
   const [liveInitialCameraOn, setLiveInitialCameraOn] = useState<boolean>(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
+  const [adminModalOpen, setAdminModalOpen] = useState<boolean>(false);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [isVerifiedBadge, setIsVerifiedBadge] = useState<boolean>(false);
   const [showInstallBanner, setShowInstallBanner] = useState<boolean>(
     () => !isInstallPromptDismissed()
   );
@@ -160,7 +172,7 @@ export default function App() {
       .then((result) => {
         if (result?.user) {
           setUser(result.user);
-          setIsEmailVerified(Boolean(result.user.emailVerified));
+          setIsEmailVerified(isUserVerifiedAccount(result.user));
           setAuthModalOpen(false);
         }
       })
@@ -171,18 +183,47 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
-      const verified = Boolean(firebaseUser?.emailVerified);
+      const verified = isUserVerifiedAccount(firebaseUser);
       setIsEmailVerified(verified);
       setVerificationBannerDismissed(false);
       setAuthReady(true);
       if (firebaseUser) {
         setAuthModalOpen(false);
         if (verified) {
-          void upsertUserProfile(firebaseUser).catch((err) => {
-            console.error('Failed to sync user profile:', err);
-          });
+          const primary = isPrimaryAdminUser(firebaseUser);
+          setIsAdmin(primary);
+          setIsVerifiedBadge(primary);
+          void upsertUserProfile(firebaseUser)
+            .then((res) => {
+              if (res.blocked || res.deleted) {
+                setIsAdmin(false);
+                setIsVerifiedBadge(false);
+                setAdminModalOpen(false);
+                setLiveModalOpen(false);
+                setBannerNotice(
+                  res.deleted
+                    ? 'Akun Anda telah dihapus oleh Administrator Sinar Warna.'
+                    : 'Akun Anda telah diblokir oleh Administrator Sinar Warna.'
+                );
+                void signOutUser();
+                return;
+              }
+              const nextAdmin = res.role === 'admin' || primary;
+              setIsAdmin(nextAdmin);
+              setIsVerifiedBadge(nextAdmin || res.verifiedBadge);
+            })
+            .catch((err) => {
+              console.error('Failed to sync user profile:', err);
+            });
+        } else {
+          setIsAdmin(false);
+          setIsVerifiedBadge(false);
+          setAdminModalOpen(false);
         }
       } else {
+        setIsAdmin(false);
+        setIsVerifiedBadge(false);
+        setAdminModalOpen(false);
         setCloudConversations([]);
         setCloudMessagesByConv({});
         setPendingMessagesByConv({});
@@ -190,6 +231,39 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Real-time subscription to user's own Admin role, block, or account removal status
+  useEffect(() => {
+    if (!authReady || !isCloudUser || !user) return;
+    let seededForSession = false;
+
+    const unsubscribe = subscribeOwnUserAccess(user, (status) => {
+      if (status.blocked || status.deleted || status.docMissingAfterSeen) {
+        setIsAdmin(false);
+        setIsVerifiedBadge(false);
+        setAdminModalOpen(false);
+        setSettingsModalOpen(false);
+        setLiveModalOpen(false);
+        setBannerNotice(
+          status.blocked
+            ? 'Akun Anda telah diblokir oleh Administrator Sinar Warna.'
+            : 'Akun Anda telah dihapus oleh Administrator Sinar Warna.'
+        );
+        void signOutUser();
+        return;
+      }
+      setIsAdmin(status.isAdmin);
+      setIsVerifiedBadge(status.isVerifiedBadge);
+      if (status.isAdmin && !seededForSession) {
+        seededForSession = true;
+        void seedDefaultAdminMemoriesOnce(user).catch((err) => {
+          console.error('Seed default admin memories skipped/error:', err);
+        });
+      }
+    });
+
+    return () => unsubscribe();
+  }, [authReady, isCloudUser, user]);
 
   // Subscribe to Firestore conversations when authenticated & verified
   useEffect(() => {
@@ -455,9 +529,15 @@ export default function App() {
       let streamError: string | undefined;
 
       try {
+        const idToken = currentUser ? await currentUser.getIdToken().catch(() => null) : null;
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (idToken) {
+          headers.Authorization = `Bearer ${idToken}`;
+        }
+
         const response = await fetch(buildApiUrl('/api/chat/stream'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           signal: controller.signal,
           body: JSON.stringify({
             mode,
@@ -948,6 +1028,8 @@ export default function App() {
         isMobileOpen={sidebarMobileOpen}
         user={user}
         isCloudUser={isCloudUser}
+        isAdmin={isAdmin}
+        isVerifiedBadge={isVerifiedBadge}
         authReady={authReady}
         authLoading={false}
         conversations={conversations}
@@ -959,6 +1041,7 @@ export default function App() {
         onDeleteConversation={(id) => {
           void handleDeleteConversation(id);
         }}
+        onOpenAdmin={() => setAdminModalOpen(true)}
         onOpenSettings={() => setSettingsModalOpen(true)}
         onSignIn={() => setAuthModalOpen(true)}
         onSignOut={() => {
@@ -1005,6 +1088,32 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setAdminModalOpen(true)}
+                title="Panel Administrator"
+                aria-label="Panel Administrator"
+                className="inline-flex h-10 items-center gap-1.5 rounded-full border border-blue-500/35 bg-gradient-to-r from-[#E51D2B]/10 to-[#0A36FF]/15 px-3 text-xs font-semibold text-[#0A36FF] dark:text-blue-200 hover:from-[#E51D2B]/20 hover:to-[#0A36FF]/25 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <ShieldCheck className="h-3.5 w-3.5 text-[#E51D2B] dark:text-[#FF4D5A]" />
+                <span>Administrator</span>
+                <VerifiedBlueBadge size="xs" title="Admin Terverifikasi" />
+              </button>
+            )}
+
+            {!isAdmin && isCloudUser && isVerifiedBadge && user && (
+              <span
+                title="Akun Terverifikasi"
+                className="inline-flex h-9 items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-50/70 dark:bg-sky-950/30 px-2.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 whitespace-nowrap shrink-0"
+              >
+                <span className="max-w-[90px] truncate hidden sm:inline">
+                  {user.displayName || 'Terverifikasi'}
+                </span>
+                <VerifiedBlueBadge size="xs" title="Akun Terverifikasi" />
+              </span>
+            )}
+
             {messages.length > 0 && (
               <button
                 type="button"
@@ -1164,6 +1273,7 @@ export default function App() {
         isOpen={liveModalOpen}
         initialCameraOn={liveInitialCameraOn}
         activeMode={activeMode}
+        user={isCloudUser ? user : null}
         onClose={(transcriptLog) => {
           void handleLiveClose(transcriptLog);
         }}
@@ -1175,12 +1285,20 @@ export default function App() {
         isInstallable={isInstallable}
         isInstalled={isInstalled}
         isIOS={isIOS}
+        isAdmin={isAdmin}
+        currentUser={user}
         onClose={() => setSettingsModalOpen(false)}
         onSetTheme={(dark) => setIsDark(dark)}
         onInstallAndroid={install}
       />
 
-      {showInstallBanner && !isInstalled && !settingsModalOpen && !liveModalOpen && !authModalOpen && (
+      <AdminModal
+        isOpen={adminModalOpen && isAdmin}
+        currentUser={user}
+        onClose={() => setAdminModalOpen(false)}
+      />
+
+      {showInstallBanner && !isInstalled && !settingsModalOpen && !adminModalOpen && !liveModalOpen && !authModalOpen && (
         <InstallAppPrompt
           isInstallable={isInstallable}
           isInstalled={isInstalled}
