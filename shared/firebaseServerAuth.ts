@@ -3,7 +3,7 @@ const FIRESTORE_DATABASE_ID = 'ai-studio-sinarwarna-dd26643e-bc06-45c9-a721-ba2b
 export const PRIMARY_ADMIN_EMAIL = 'rudi.sinarwarna@gmail.com';
 
 const JWKS_URL =
-  'https://www.googleapis.com/service_account/v1/jwk/securetoken@system.gserviceaccount.com';
+  'https://www.googleapis.com/robot/v1/metadata/jwk/securetoken@system.gserviceaccount.com';
 
 interface CachedJwks {
   keys: Record<string, JsonWebKey & { kid?: string; alg?: string; use?: string }>;
@@ -41,6 +41,7 @@ export interface ServerAuthContext {
   isPrimaryAdmin: boolean;
   isBlocked: boolean;
   adminMemories: AdminMemoryRecord[];
+  adminMemoriesFetchOk: boolean;
   publicMemories: AdminMemoryRecord[];
   freewill: FreewillServerConfig;
   seedMetaExists: boolean;
@@ -64,9 +65,9 @@ function decodeJwtJson<T>(segment: string): T {
   return JSON.parse(text) as T;
 }
 
-async function getGoogleJwks(): Promise<CachedJwks['keys']> {
+async function getGoogleJwks(forceRefresh = false): Promise<CachedJwks['keys']> {
   const now = Date.now();
-  if (jwksCache && jwksCache.expiresAt > now) {
+  if (!forceRefresh && jwksCache && jwksCache.expiresAt > now) {
     return jwksCache.keys;
   }
 
@@ -131,8 +132,12 @@ export async function verifyFirebaseIdToken(
       return null;
     }
 
-    const keys = await getGoogleJwks();
-    const jwk = keys[header.kid];
+    let keys = await getGoogleJwks(false);
+    let jwk = keys[header.kid];
+    if (!jwk) {
+      keys = await getGoogleJwks(true);
+      jwk = keys[header.kid];
+    }
     if (!jwk) return null;
 
     const cryptoKey = await crypto.subtle.importKey(
@@ -159,7 +164,8 @@ export async function verifyFirebaseIdToken(
       email: (payload.email || '').trim().toLowerCase(),
       emailVerified: Boolean(payload.email_verified),
     };
-  } catch {
+  } catch (err) {
+    console.warn('[verifyFirebaseIdToken] failed:', err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -186,22 +192,35 @@ function getDocIdFromName(name: string | undefined): string {
   return idx >= 0 ? name.slice(idx + 1) : name;
 }
 
+export async function fetchAdminMemoriesServerWithStatus(
+  idToken: string
+): Promise<{ ok: boolean; memories: AdminMemoryRecord[] }> {
+  try {
+    const url = `${firestoreDocsBaseUrl()}/adminMemories?pageSize=100`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) return { ok: false, memories: [] };
+    const data = (await res.json()) as { documents?: FirestoreRestDoc[] };
+    const memories = (data.documents || [])
+      .map((d) => ({
+        id: d.fields?.id?.stringValue || getDocIdFromName(d.name),
+        title: d.fields?.title?.stringValue || 'Pengingat',
+        content: d.fields?.content?.stringValue || '',
+      }))
+      .filter((m) => m.id && m.content);
+    return { ok: true, memories };
+  } catch {
+    return { ok: false, memories: [] };
+  }
+}
+
 export async function fetchAdminMemoriesServer(idToken: string): Promise<AdminMemoryRecord[]> {
-  const url = `${firestoreDocsBaseUrl()}/adminMemories?pageSize=100`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${idToken}`,
-    },
-  });
-  if (!res.ok) return [];
-  const data = (await res.json()) as { documents?: FirestoreRestDoc[] };
-  return (data.documents || [])
-    .map((d) => ({
-      id: d.fields?.id?.stringValue || getDocIdFromName(d.name),
-      title: d.fields?.title?.stringValue || 'Pengingat',
-      content: d.fields?.content?.stringValue || '',
-    }))
-    .filter((m) => m.id && m.content);
+  const { memories } = await fetchAdminMemoriesServerWithStatus(idToken);
+  return memories;
 }
 
 export async function fetchPublicMemoriesServer(): Promise<AdminMemoryRecord[]> {
@@ -295,6 +314,7 @@ export async function resolveServerAuthContext(
     isPrimaryAdmin: false,
     isBlocked: false,
     adminMemories: [],
+    adminMemoriesFetchOk: false,
     publicMemories,
     freewill,
     seedMetaExists: false,
@@ -354,16 +374,18 @@ export async function resolveServerAuthContext(
   );
 
   let adminMemories: AdminMemoryRecord[] = [];
+  let adminMemoriesFetchOk = false;
   let seedMetaExists = false;
 
   if (canAccessAdminMemories) {
     const base = firestoreDocsBaseUrl();
     const headers = { Authorization: `Bearer ${idToken}` };
-    const [memories, seedRes] = await Promise.all([
-      fetchAdminMemoriesServer(idToken).catch(() => []),
-      fetch(`${base}/adminMeta/seed`, { headers }).catch(() => null),
+    const [memoriesResult, seedRes] = await Promise.all([
+      fetchAdminMemoriesServerWithStatus(idToken),
+      fetch(`${base}/adminMeta/seed`, { headers, signal: AbortSignal.timeout(4000) }).catch(() => null),
     ]);
-    adminMemories = memories;
+    adminMemories = memoriesResult.memories;
+    adminMemoriesFetchOk = memoriesResult.ok;
     seedMetaExists = Boolean(seedRes && seedRes.ok);
   }
 
@@ -377,6 +399,7 @@ export async function resolveServerAuthContext(
     isPrimaryAdmin,
     isBlocked,
     adminMemories,
+    adminMemoriesFetchOk,
     publicMemories,
     freewill,
     seedMetaExists,

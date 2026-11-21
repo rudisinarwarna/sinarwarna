@@ -7,6 +7,7 @@ import {
   Pause,
   PhoneOff,
   Play,
+  RefreshCw,
   SwitchCamera,
   Video,
   VideoOff,
@@ -117,6 +118,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   const [handoffNotice, setHandoffNotice] = useState<string | null>(null);
   const [voice, setVoice] = useState<VoicePersonaId>('santi');
   const [connectTriggerVoice, setConnectTriggerVoice] = useState<VoicePersonaId>('santi');
+  const [reconnectNonce, setReconnectNonce] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(initialCameraOn);
@@ -125,6 +127,8 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const serverReadyRef = useRef(false);
+  const pingIntervalRef = useRef<number | null>(null);
   const inputAudioCtxRef = useRef<AudioContext | null>(null);
   const outputAudioCtxRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -142,6 +146,15 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   const owieBarkCursorRef = useRef<number>(0);
   const transcriptsRef = useRef<TranscriptEntry[]>([]);
   const transcriptsEndRef = useRef<HTMLDivElement>(null);
+
+  const ensureAudioContextsRunning = useCallback(() => {
+    if (inputAudioCtxRef.current?.state === 'suspended') {
+      void inputAudioCtxRef.current.resume().catch(() => {});
+    }
+    if (outputAudioCtxRef.current?.state === 'suspended') {
+      void outputAudioCtxRef.current.resume().catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     isMutedRef.current = isMuted;
@@ -197,6 +210,12 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   }, []);
 
   const cleanupSession = useCallback(() => {
+    serverReadyRef.current = false;
+    if (pingIntervalRef.current !== null) {
+      window.clearInterval(pingIntervalRef.current);
+      pingIntervalRef.current = null;
+    }
+
     stopPlaybackQueue();
     stopCameraStream();
 
@@ -229,6 +248,9 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
 
     if (wsRef.current) {
       try {
+        wsRef.current.onclose = null;
+        wsRef.current.onerror = null;
+        wsRef.current.onmessage = null;
         wsRef.current.close();
       } catch {
         // Ignore close error
@@ -278,7 +300,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     if (!outCtx) return;
 
     if (outCtx.state === 'suspended') {
-      void outCtx.resume();
+      void outCtx.resume().catch(() => {});
     }
 
     const float32 = decodeBase64Pcm24kToFloat32(base64Audio);
@@ -292,6 +314,10 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     source.connect(outCtx.destination);
 
     const now = outCtx.currentTime;
+    // Prevent runaway scheduling drift if AudioContext was briefly suspended
+    if (nextStartTimeRef.current - now > 8) {
+      nextStartTimeRef.current = now;
+    }
     const startAt = Math.max(now, nextStartTimeRef.current);
     nextStartTimeRef.current = startAt + buffer.duration;
 
@@ -430,9 +456,18 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
 
         const inputCtx = new AudioContext({ sampleRate: 16000 });
         const outputCtx = new AudioContext({ sampleRate: 24000 });
-        if (outputCtx.state === 'suspended') {
-          void outputCtx.resume().catch(() => {});
-        }
+        const keepAudioAwake = (ctx: AudioContext) => {
+          ctx.onstatechange = () => {
+            if (!cancelled && ctx.state !== 'running' && ctx.state !== 'closed') {
+              void ctx.resume().catch(() => {});
+            }
+          };
+          if (ctx.state !== 'running') {
+            void ctx.resume().catch(() => {});
+          }
+        };
+        keepAudioAwake(inputCtx);
+        keepAudioAwake(outputCtx);
         inputAudioCtxRef.current = inputCtx;
         outputAudioCtxRef.current = outputCtx;
         owieBuffersRef.current = [];
@@ -446,11 +481,32 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
+        let hadErrorEvent = false;
+
+        ws.onopen = () => {
+          if (cancelled) return;
+          ensureAudioContextsRunning();
+          if (pingIntervalRef.current !== null) {
+            window.clearInterval(pingIntervalRef.current);
+          }
+          pingIntervalRef.current = window.setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              try {
+                ws.send(JSON.stringify({ ping: true }));
+              } catch {
+                // Ignore ping send error
+              }
+            }
+          }, 12000);
+        };
+
         ws.onmessage = (event) => {
           if (cancelled) return;
           try {
             const msg = JSON.parse(String(event.data)) as {
               ready?: boolean;
+              sessionReady?: boolean;
+              pong?: boolean;
               voice?: VoicePersonaId;
               switchingVoice?: VoicePersonaId;
               switchedVoiceReady?: VoicePersonaId;
@@ -465,7 +521,12 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
               error?: string;
             };
 
-            if (msg.ready) {
+            if (msg.pong) return;
+
+            if (msg.ready || msg.sessionReady) {
+              serverReadyRef.current = true;
+              setHandoffNotice(null);
+              ensureAudioContextsRunning();
               if (msg.voice) {
                 voiceRef.current = msg.voice;
                 setVoice(msg.voice);
@@ -474,15 +535,20 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
             }
 
             if (msg.switchingVoice) {
+              serverReadyRef.current = false;
               stopPlaybackQueue();
               voiceRef.current = msg.switchingVoice;
               setVoice(msg.switchingVoice);
               setHandoffNotice(
                 msg.handoffNotice || `Memanggil ${getPersonaLabel(msg.switchingVoice)}...`
               );
+            } else if (msg.handoffNotice && !msg.switchingVoice) {
+              serverReadyRef.current = false;
+              setHandoffNotice(msg.handoffNotice);
             }
 
             if (msg.switchedVoiceReady) {
+              serverReadyRef.current = true;
               voiceRef.current = msg.switchedVoiceReady;
               setVoice(msg.switchedVoiceReady);
               setHandoffNotice(null);
@@ -492,6 +558,8 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
             }
 
             if (msg.error) {
+              hadErrorEvent = true;
+              serverReadyRef.current = false;
               setErrorMessage(msg.error);
               setStatus('error');
               return;
@@ -532,13 +600,31 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
 
         ws.onerror = () => {
           if (!cancelled) {
+            hadErrorEvent = true;
+            serverReadyRef.current = false;
             setErrorMessage('Gagal menyambung ke server Gemini Live.');
             setStatus('error');
           }
         };
 
+        ws.onclose = (ev) => {
+          if (cancelled) return;
+          serverReadyRef.current = false;
+          if (pingIntervalRef.current !== null) {
+            window.clearInterval(pingIntervalRef.current);
+            pingIntervalRef.current = null;
+          }
+          if (!hadErrorEvent) {
+            const detail = ev.reason ? ` (${ev.reason})` : '';
+            setErrorMessage(
+              `Koneksi AI Live terputus${detail}. Tekan Sambung Ulang untuk melanjutkan.`
+            );
+            setStatus('error');
+          }
+        };
+
         const source = inputCtx.createMediaStreamSource(micStream);
-        const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+        const processor = inputCtx.createScriptProcessor(2048, 1, 1);
         processorRef.current = processor;
 
         const silentGain = inputCtx.createGain();
@@ -562,11 +648,17 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           setMicEnergy(Math.min(1, rms * 5));
 
           const activeWs = wsRef.current;
-          if (!activeWs || activeWs.readyState !== WebSocket.OPEN) return;
+          if (!activeWs || activeWs.readyState !== WebSocket.OPEN || !serverReadyRef.current) {
+            return;
+          }
 
           const resampled = downsampleTo16k(rawChannel, inputCtx.sampleRate);
           const base64 = float32ToInt16Base64(resampled);
-          activeWs.send(JSON.stringify({ audio: base64 }));
+          try {
+            activeWs.send(JSON.stringify({ audio: base64 }));
+          } catch {
+            // Ignore transient ws send failure
+          }
         };
       } catch {
         if (!cancelled) {
@@ -589,10 +681,12 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     appendTranscriptChunk,
     cleanupSession,
     connectTriggerVoice,
+    ensureAudioContextsRunning,
     isOpen,
     playAudioChunk24k,
     playChihuahuaBark,
     preloadOwieBarks,
+    reconnectNonce,
     stopPlaybackQueue,
     user?.uid,
   ]);
@@ -630,7 +724,9 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           if (isPausedRef.current) return;
           const video = videoRef.current;
           const activeWs = wsRef.current;
-          if (!video || !activeWs || activeWs.readyState !== WebSocket.OPEN) return;
+          if (!video || !activeWs || activeWs.readyState !== WebSocket.OPEN || !serverReadyRef.current) {
+            return;
+          }
           if (video.readyState < 2) return;
 
           const w = video.videoWidth || 640;
@@ -648,7 +744,11 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
           const base64 = dataUrl.split(',')[1];
           if (base64) {
-            activeWs.send(JSON.stringify({ video: base64 }));
+            try {
+              activeWs.send(JSON.stringify({ video: base64 }));
+            } catch {
+              // Ignore transient video send failure
+            }
           }
         }, 1000);
       } catch {
@@ -687,6 +787,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         stopPlaybackQueue();
         setStatus('paused');
       } else {
+        ensureAudioContextsRunning();
         setStatus('listening');
       }
       return next;
@@ -709,6 +810,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
 
   return (
     <div
+      onPointerDown={ensureAudioContextsRunning}
       className="fixed inset-0 z-50 flex flex-col bg-[#060914] text-white overflow-hidden"
       role="dialog"
       aria-modal="true"
@@ -793,9 +895,23 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
       {/* Center Stage */}
       <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-end sm:justify-center px-4 py-2">
         {errorMessage && (
-          <div className="mb-3 flex max-w-md items-center gap-2.5 rounded-2xl border border-red-500/40 bg-red-950/75 px-4 py-3 text-xs text-red-200 backdrop-blur-md">
-            <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
-            <span>{errorMessage}</span>
+          <div className="mb-3 flex max-w-md flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-red-500/40 bg-red-950/75 px-4 py-3 text-xs text-red-200 backdrop-blur-md">
+            <div className="flex min-w-0 flex-1 items-center gap-2.5">
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
+              <span>{errorMessage}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setErrorMessage(null);
+                setConnectTriggerVoice(voiceRef.current);
+                setReconnectNonce((n) => n + 1);
+              }}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-3 text-[11px] font-semibold text-white hover:bg-white/25 transition-colors cursor-pointer"
+            >
+              <RefreshCw className="h-3 w-3" />
+              <span>Sambung Ulang</span>
+            </button>
           </div>
         )}
 

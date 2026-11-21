@@ -76,7 +76,8 @@ export async function runChatStreamWithTools(params: {
   );
 
   const effectiveAdminMemories = authContext.canAccessAdminMemories
-    ? authContext.adminMemories.length > 0 || authContext.seedMetaExists
+    ? authContext.adminMemories.length > 0 ||
+      (authContext.seedMetaExists && authContext.adminMemoriesFetchOk)
       ? [...authContext.adminMemories]
       : [...DEFAULT_ADMIN_PRIVATE_MEMORIES]
     : authContext.freewill.enabled && !authContext.freewill.memoriesSummary

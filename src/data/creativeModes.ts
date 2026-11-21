@@ -5,8 +5,8 @@ export const CREATIVE_MODES: CreativeModeConfig[] = [
     id: 'general',
     label: 'Umum & Ideasi',
     shortLabel: 'Ideasi',
-    description: 'Brainstorming lintas disiplin, eksplorasi konsep, dan pemecahan masalah kreatif.',
-    placeholder: 'Tanya Sinar Warna untuk bertukar ide, menulis, atau merancang konsep...',
+    description: 'Tanya jawab apa saja, cari solusi masalah umum, ideasi, hingga konsultasi cat.',
+    placeholder: 'Tanyakan apa saja, cari solusi masalah, atau konsultasi seputar cat...',
   },
   {
     id: 'design',
