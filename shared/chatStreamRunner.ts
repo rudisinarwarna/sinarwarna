@@ -99,6 +99,19 @@ export async function runChatStreamWithTools(params: {
           ? authContext.adminMemories.map(normalizeFounderNick)
           : [...DEFAULT_ADMIN_PRIVATE_MEMORIES];
       const existingIds = new Set(base.map((m) => m.id));
+      if (!authContext.seedFamilyInaMetaExists || !authContext.seedRudiNoteMetaExists) {
+        for (const m of DEFAULT_ADMIN_PRIVATE_MEMORIES) {
+          if (
+            (m.id === 'mem_default_cynthia_cyndi' ||
+              m.id === 'mem_default_ina_karyawan' ||
+              m.id === 'mem_default_rudi_tidak_serumah') &&
+            !existingIds.has(m.id)
+          ) {
+            base.push(m);
+            existingIds.add(m.id);
+          }
+        }
+      }
       for (const p of DEFAULT_ADMIN_PHOTO_MEMORIES) {
         const shouldIncludeFounderFallback =
           p.id === 'mem_default_foto_rudi_hongkwe' && !authContext.seedFounderPhotoMetaExists;

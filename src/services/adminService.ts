@@ -178,8 +178,17 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
     const photoSeeded = seedData?.seededPhotoMemories === true;
     const founderPhotoSeeded = seedData?.seededFounderPhoto === true;
     const founderAngkuiSeeded = seedData?.seededFounderAngkui === true;
+    const familyInaSeeded = seedData?.seededFamilyIna === true;
+    const rudiNoteSeeded = seedData?.seededRudiNote === true;
 
-    if (defaultSeeded && photoSeeded && founderPhotoSeeded && founderAngkuiSeeded) {
+    if (
+      defaultSeeded &&
+      photoSeeded &&
+      founderPhotoSeeded &&
+      founderAngkuiSeeded &&
+      familyInaSeeded &&
+      rudiNoteSeeded
+    ) {
       return;
     }
 
@@ -188,8 +197,16 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
 
     const batch = writeBatch(db);
 
-    if (!defaultSeeded) {
+    if (!defaultSeeded || !familyInaSeeded || !rudiNoteSeeded) {
       for (const mem of DEFAULT_ADMIN_PRIVATE_MEMORIES) {
+        if (
+          defaultSeeded &&
+          mem.id !== 'mem_default_cynthia_cyndi' &&
+          mem.id !== 'mem_default_ina_karyawan' &&
+          mem.id !== 'mem_default_rudi_tidak_serumah'
+        ) {
+          continue;
+        }
         if (!existingById.has(mem.id)) {
           batch.set(doc(db, 'adminMemories', mem.id), {
             id: mem.id,
@@ -247,6 +264,8 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
         seededPhotoMemories: true,
         seededFounderPhoto: true,
         seededFounderAngkui: true,
+        seededFamilyIna: true,
+        seededRudiNote: true,
         updatedBy: uid,
         updatedAt: serverTimestamp(),
       });
@@ -256,6 +275,8 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
         seededPhotoMemories: true,
         seededFounderPhoto: true,
         seededFounderAngkui: true,
+        seededFamilyIna: true,
+        seededRudiNote: true,
         updatedBy: uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),

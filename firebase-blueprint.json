@@ -167,6 +167,12 @@
         "seededFounderAngkui": {
           "type": "boolean"
         },
+        "seededFamilyIna": {
+          "type": "boolean"
+        },
+        "seededRudiNote": {
+          "type": "boolean"
+        },
         "updatedBy": {
           "type": "string",
           "minLength": 1,

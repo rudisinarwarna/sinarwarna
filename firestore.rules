@@ -189,11 +189,13 @@ service cloud.firestore {
 
     function isValidAdminSeedMeta(data) {
       return data.keys().hasAll(['seededDefaultMemories', 'updatedBy', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['seededDefaultMemories', 'seededPhotoMemories', 'seededFounderPhoto', 'seededFounderAngkui', 'updatedBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['seededDefaultMemories', 'seededPhotoMemories', 'seededFounderPhoto', 'seededFounderAngkui', 'seededFamilyIna', 'seededRudiNote', 'updatedBy', 'createdAt', 'updatedAt']) &&
         data.seededDefaultMemories is bool &&
         (!('seededPhotoMemories' in data) || data.seededPhotoMemories is bool) &&
         (!('seededFounderPhoto' in data) || data.seededFounderPhoto is bool) &&
         (!('seededFounderAngkui' in data) || data.seededFounderAngkui is bool) &&
+        (!('seededFamilyIna' in data) || data.seededFamilyIna is bool) &&
+        (!('seededRudiNote' in data) || data.seededRudiNote is bool) &&
         data.updatedBy is string &&
         data.updatedBy.size() >= 1 &&
         data.updatedBy.size() <= 128 &&
@@ -398,7 +400,7 @@ service cloud.firestore {
         isValidAdminSeedMeta(incoming()) &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['seededDefaultMemories', 'seededPhotoMemories', 'seededFounderPhoto', 'seededFounderAngkui', 'updatedBy', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['seededDefaultMemories', 'seededPhotoMemories', 'seededFounderPhoto', 'seededFounderAngkui', 'seededFamilyIna', 'seededRudiNote', 'updatedBy', 'updatedAt']);
       allow delete: if false;
     }
 
