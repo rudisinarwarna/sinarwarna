@@ -169,7 +169,7 @@ service cloud.firestore {
 
     function isValidAdminMemory(data, memoryId) {
       return data.keys().hasAll(['id', 'title', 'content', 'createdBy', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['id', 'title', 'content', 'createdBy', 'createdByEmail', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'title', 'content', 'imageData', 'createdBy', 'createdByEmail', 'createdAt', 'updatedAt']) &&
         isValidId(data.id) &&
         data.id == memoryId &&
         data.title is string &&
@@ -178,6 +178,7 @@ service cloud.firestore {
         data.content is string &&
         data.content.size() >= 1 &&
         data.content.size() <= 2000 &&
+        (!('imageData' in data) || (data.imageData is string && data.imageData.size() <= 160000)) &&
         data.createdBy is string &&
         data.createdBy.size() >= 1 &&
         data.createdBy.size() <= 128 &&
@@ -188,8 +189,11 @@ service cloud.firestore {
 
     function isValidAdminSeedMeta(data) {
       return data.keys().hasAll(['seededDefaultMemories', 'updatedBy', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['seededDefaultMemories', 'updatedBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['seededDefaultMemories', 'seededPhotoMemories', 'seededFounderPhoto', 'seededFounderAngkui', 'updatedBy', 'createdAt', 'updatedAt']) &&
         data.seededDefaultMemories is bool &&
+        (!('seededPhotoMemories' in data) || data.seededPhotoMemories is bool) &&
+        (!('seededFounderPhoto' in data) || data.seededFounderPhoto is bool) &&
+        (!('seededFounderAngkui' in data) || data.seededFounderAngkui is bool) &&
         data.updatedBy is string &&
         data.updatedBy.size() >= 1 &&
         data.updatedBy.size() <= 128 &&
@@ -361,40 +365,40 @@ service cloud.firestore {
         );
     }
 
-    // Admin+ & Primary Admin Private AI Memories Collection (never accessible to plain Admin or regular users)
+    // Admin, Admin+ & Primary Admin Shared Memories Collection (never accessible to regular users)
     match /adminMemories/{memoryId} {
-      allow get, list: if isAdminPlus();
-      allow create: if isAdminPlus() &&
+      allow get, list: if isAnyAdmin();
+      allow create: if isAnyAdmin() &&
         isValidId(memoryId) &&
         isValidAdminMemory(incoming(), memoryId) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isAdminPlus() &&
+      allow update: if isAnyAdmin() &&
         isValidId(memoryId) &&
         isValidAdminMemory(incoming(), memoryId) &&
         incoming().id == existing().id &&
         incoming().createdBy == existing().createdBy &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'content', 'updatedAt']);
-      allow delete: if isAdminPlus() && isValidId(memoryId);
+        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'content', 'imageData', 'updatedAt']);
+      allow delete: if isAnyAdmin() && isValidId(memoryId);
     }
 
-    // Admin+ Metadata (one-time default memory seed flag)
+    // Admin Metadata (one-time default memory seed flag)
     match /adminMeta/{docId} {
-      allow get: if isAdminPlus() && docId == 'seed';
+      allow get: if isAnyAdmin() && docId == 'seed';
       allow list: if false;
-      allow create: if isAdminPlus() &&
+      allow create: if isAnyAdmin() &&
         docId == 'seed' &&
         isValidAdminSeedMeta(incoming()) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
-      allow update: if isAdminPlus() &&
+      allow update: if isAnyAdmin() &&
         docId == 'seed' &&
         isValidAdminSeedMeta(incoming()) &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['seededDefaultMemories', 'updatedBy', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['seededDefaultMemories', 'seededPhotoMemories', 'seededFounderPhoto', 'seededFounderAngkui', 'updatedBy', 'updatedAt']);
       allow delete: if false;
     }
 

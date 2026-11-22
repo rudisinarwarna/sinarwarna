@@ -1,8 +1,11 @@
 import {
   Modality,
+  type Content,
   type GoogleGenAI,
   type LiveServerMessage,
+  type Part,
 } from '@google/genai';
+import { DEFAULT_ADMIN_PHOTO_MEMORIES } from './adminPhotoMemories.ts';
 import {
   deleteAdminMemoriesByKeywordServer,
   deletePublicMemoriesByKeywordServer,
@@ -17,6 +20,7 @@ import {
   formatGeminiError,
   normalizePersonaId,
   PERSONA_DISPLAY_NAMES,
+  type AdminMemoryItem,
   type CanonicalVoiceId,
 } from './sinarWarnaPrompt.ts';
 
@@ -60,14 +64,53 @@ export function createLiveBridge(params: {
       authContext.idToken &&
       authContext.uid
   );
-  const adminMemories = authContext.canAccessAdminMemories
-    ? authContext.adminMemories.length > 0 ||
-      (authContext.seedMetaExists && authContext.adminMemoriesFetchOk)
-      ? [...authContext.adminMemories]
-      : [...DEFAULT_ADMIN_PRIVATE_MEMORIES]
-    : authContext.freewill.enabled && !authContext.freewill.memoriesSummary
-    ? [...DEFAULT_ADMIN_PRIVATE_MEMORIES]
-    : [];
+  const adminMemories: AdminMemoryItem[] = (() => {
+    const normalizeFounderNick = (item: AdminMemoryItem): AdminMemoryItem => {
+      if (
+        !authContext.seedFounderAngkuiMetaExists &&
+        item.id === 'mem_default_foto_rudi_hongkwe' &&
+        item.content.includes('memanggilnya "Kui"')
+      ) {
+        return {
+          ...item,
+          content: item.content.replace('memanggilnya "Kui"', 'memanggilnya "Angkui"'),
+        };
+      }
+      return item;
+    };
+
+    if (authContext.canAccessAdminMemories) {
+      const base: AdminMemoryItem[] =
+        authContext.adminMemories.length > 0 ||
+        (authContext.seedMetaExists && authContext.adminMemoriesFetchOk)
+          ? authContext.adminMemories.map(normalizeFounderNick)
+          : [...DEFAULT_ADMIN_PRIVATE_MEMORIES];
+      const existingIds = new Set(base.map((m) => m.id));
+      for (const p of DEFAULT_ADMIN_PHOTO_MEMORIES) {
+        const shouldIncludeFounderFallback =
+          p.id === 'mem_default_foto_rudi_hongkwe' && !authContext.seedFounderPhotoMetaExists;
+        const shouldIncludeGeneralFallback =
+          !authContext.seedPhotoMetaExists || !authContext.adminMemoriesFetchOk;
+        if ((shouldIncludeFounderFallback || shouldIncludeGeneralFallback) && !existingIds.has(p.id)) {
+          base.push(p);
+        }
+      }
+      return base;
+    }
+    if (authContext.freewill.enabled) {
+      return !authContext.freewill.memoriesSummary
+        ? [...DEFAULT_ADMIN_PRIVATE_MEMORIES, ...DEFAULT_ADMIN_PHOTO_MEMORIES]
+        : [...DEFAULT_ADMIN_PHOTO_MEMORIES];
+    }
+    return [];
+  })();
+
+  const getPhotoMemories = (): Array<{ title: string; content: string; imageData: string }> => {
+    if (!includePrivateMemories) return [];
+    return adminMemories
+      .filter((m): m is AdminMemoryItem & { imageData: string } => Boolean(m.imageData))
+      .slice(0, 6);
+  };
   const publicMemories = [...authContext.publicMemories];
 
   let activeSession: LiveSession | null = null;
@@ -350,7 +393,7 @@ export function createLiveBridge(params: {
                     });
                   } else if (name === 'save_admin_memory') {
                     if (canUseAdminMemories && authContext.idToken && authContext.uid) {
-                      const title = String(args.title || 'Pengingat Pribadi').trim();
+                      const title = String(args.title || 'Pengingat Admin').trim();
                       const content = String(args.content || '').trim();
                       const saved = await saveAdminMemoryServer({
                         idToken: authContext.idToken,
@@ -378,7 +421,7 @@ export function createLiveBridge(params: {
                         name,
                         response: {
                           ok: false,
-                          error: 'Khusus akun Admin+ atau Admin Utama terverifikasi.',
+                          error: 'Khusus akun Admin, Admin+, atau Admin Utama terverifikasi.',
                         },
                       });
                     }
@@ -416,7 +459,7 @@ export function createLiveBridge(params: {
                         name,
                         response: {
                           ok: false,
-                          error: 'Khusus akun Admin+ atau Admin Utama terverifikasi.',
+                          error: 'Khusus akun Admin, Admin+, atau Admin Utama terverifikasi.',
                         },
                       });
                     }
@@ -603,22 +646,59 @@ export function createLiveBridge(params: {
     }
 
     activeSession = thisSession;
+
+    const photoMemories = getPhotoMemories();
+    const shouldGreet = !isReconnect || recentTurns.length === 0;
+    const turnsToSend: Content[] = [];
+
+    if (photoMemories.length > 0) {
+      const photoParts: Part[] = [
+        {
+          text: 'REFERENSI FOTO PENGINGAT ADMIN (HAPALKAN STRUKTUR INTI WAJAH & KETERANGAN INI UNTUK MENGENALI ORANG/OBJEK SAAT KAMERA LIVE AKTIF — TETAP KENALI WALAU MEREKA GANTI GAYA RAMBUT ATAU MEMAKAI/MELEPAS KACAMATA):',
+        },
+      ];
+      for (const pm of photoMemories) {
+        photoParts.push({
+          text: `Foto Referensi [${pm.title}]: ${pm.content}`,
+        });
+        photoParts.push({
+          inlineData: {
+            mimeType: 'image/jpeg',
+            data: pm.imageData,
+          },
+        });
+      }
+      turnsToSend.push({ role: 'user', parts: photoParts });
+      turnsToSend.push({
+        role: 'model',
+        parts: [
+          {
+            text: 'Baik, semua foto referensi pengingat admin sudah saya hafalkan dan siap digunakan untuk mengenali wajah maupun objek di kamera Live.',
+          },
+        ],
+      });
+    }
+
+    if (shouldGreet) {
+      turnsToSend.push({ role: 'user', parts: [{ text: greetingPrompt }] });
+    }
+
+    if (turnsToSend.length > 0 && isStillCurrent()) {
+      try {
+        thisSession.sendClientContent({
+          turns: turnsToSend,
+          turnComplete: shouldGreet,
+        });
+      } catch {
+        // Non-fatal priming/greeting error
+      }
+    }
+
     if (openNotified) {
       emitReadyIfCurrent();
     } else {
       // ai.live.connect resolves only after the underlying socket has opened
       emitReadyIfCurrent();
-    }
-
-    if (!isReconnect || recentTurns.length === 0) {
-      try {
-        thisSession.sendClientContent({
-          turns: [{ role: 'user', parts: [{ text: greetingPrompt }] }],
-          turnComplete: true,
-        });
-      } catch {
-        // Non-fatal greeting error
-      }
     }
   };
 

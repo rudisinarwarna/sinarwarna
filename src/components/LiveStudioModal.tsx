@@ -26,12 +26,12 @@ interface LiveStudioModalProps {
   onClose: (transcriptLog?: Array<{ role: 'user' | 'model'; text: string }>) => void;
 }
 
-type VoicePersonaId = 'santi' | 'cynthia' | 'awen' | 'cyndi' | 'owie';
+type VoicePersonaId = 'awen' | 'santi' | 'cynthia' | 'cyndi' | 'owie';
 
 const VOICE_OPTIONS: Array<{ id: VoicePersonaId; label: string }> = [
+  { id: 'awen', label: 'Awen' },
   { id: 'santi', label: 'Santi' },
   { id: 'cynthia', label: 'Cynthia' },
-  { id: 'awen', label: 'Awen' },
   { id: 'cyndi', label: 'Cyndi' },
   { id: 'owie', label: 'Owie' },
 ];
@@ -51,7 +51,7 @@ const OWIE_BARK_CLIPS = [
 ] as const;
 
 function getPersonaLabel(id: string | undefined): string {
-  return VOICE_OPTIONS.find((item) => item.id === id)?.label || 'Santi';
+  return VOICE_OPTIONS.find((item) => item.id === id)?.label || 'Awen';
 }
 
 function downsampleTo16k(float32: Float32Array, inputSampleRate: number): Float32Array {
@@ -103,6 +103,64 @@ function decodeBase64Pcm24kToFloat32(base64: string): Float32Array<ArrayBuffer> 
   return float32;
 }
 
+async function acquireCameraStream(targetFacing: 'user' | 'environment'): Promise<MediaStream> {
+  const attempts: Array<MediaTrackConstraints | boolean> = [
+    {
+      facingMode: { exact: targetFacing },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+    },
+    {
+      facingMode: { ideal: targetFacing },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+    },
+    {
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+    },
+    true,
+  ];
+
+  try {
+    if (navigator.mediaDevices?.enumerateDevices) {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoInputs = devices.filter((d) => d.kind === 'videoinput');
+      if (videoInputs.length > 1) {
+        const wantFront = targetFacing === 'user';
+        const matched = videoInputs.find((d) => {
+          const label = d.label.toLowerCase();
+          return wantFront
+            ? /front|user|selfie|depan|facetime/.test(label)
+            : /back|rear|environment|belakang|wide/.test(label);
+        });
+        if (matched?.deviceId) {
+          attempts.splice(1, 0, {
+            deviceId: { exact: matched.deviceId },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          });
+        }
+      }
+    }
+  } catch {
+    // Ignore enumerateDevices error
+  }
+
+  let lastErr: unknown;
+  for (const videoConstraint of attempts) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        video: videoConstraint,
+        audio: false,
+      });
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('Kamera tidak tersedia');
+}
+
 export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   isOpen,
   initialCameraOn = false,
@@ -116,8 +174,8 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [handoffNotice, setHandoffNotice] = useState<string | null>(null);
-  const [voice, setVoice] = useState<VoicePersonaId>('santi');
-  const [connectTriggerVoice, setConnectTriggerVoice] = useState<VoicePersonaId>('santi');
+  const [voice, setVoice] = useState<VoicePersonaId>('awen');
+  const [connectTriggerVoice, setConnectTriggerVoice] = useState<VoicePersonaId>('awen');
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -146,6 +204,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   const owieBarkCursorRef = useRef<number>(0);
   const transcriptsRef = useRef<TranscriptEntry[]>([]);
   const transcriptsEndRef = useRef<HTMLDivElement>(null);
+  const sessionInitIdRef = useRef(0);
 
   const ensureAudioContextsRunning = useCallback(() => {
     if (inputAudioCtxRef.current?.state === 'suspended') {
@@ -314,11 +373,8 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     source.connect(outCtx.destination);
 
     const now = outCtx.currentTime;
-    // Prevent runaway scheduling drift if AudioContext was briefly suspended
-    if (nextStartTimeRef.current - now > 8) {
-      nextStartTimeRef.current = now;
-    }
-    const startAt = Math.max(now, nextStartTimeRef.current);
+    const startAt =
+      activeSourcesRef.current.size === 0 ? now : Math.max(now, nextStartTimeRef.current);
     nextStartTimeRef.current = startAt + buffer.duration;
 
     activeSourcesRef.current.add(source);
@@ -383,7 +439,8 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
       compressor.connect(outCtx.destination);
 
       const now = outCtx.currentTime;
-      const startAt = Math.max(now, nextStartTimeRef.current);
+      const startAt =
+        activeSourcesRef.current.size === 0 ? now : Math.max(now, nextStartTimeRef.current);
       nextStartTimeRef.current = startAt + buffer.duration;
 
       activeSourcesRef.current.add(source);
@@ -433,6 +490,9 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     }
 
     let cancelled = false;
+    const initId = ++sessionInitIdRef.current;
+    const isCurrentInit = () => !cancelled && initId === sessionInitIdRef.current;
+
     setStatus('connecting');
     setErrorMessage(null);
     setHandoffNotice(null);
@@ -448,7 +508,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
             autoGainControl: true,
           },
         });
-        if (cancelled) {
+        if (!isCurrentInit()) {
           for (const t of micStream.getTracks()) t.stop();
           return;
         }
@@ -458,7 +518,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         const outputCtx = new AudioContext({ sampleRate: 24000 });
         const keepAudioAwake = (ctx: AudioContext) => {
           ctx.onstatechange = () => {
-            if (!cancelled && ctx.state !== 'running' && ctx.state !== 'closed') {
+            if (isCurrentInit() && ctx.state !== 'running' && ctx.state !== 'closed') {
               void ctx.resume().catch(() => {});
             }
           };
@@ -474,7 +534,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         void preloadOwieBarks(outputCtx);
 
         const idToken = await userRef.current?.getIdToken().catch(() => null);
-        if (cancelled) return;
+        if (!isCurrentInit()) return;
 
         const wsUrl = buildLiveWsUrl(connectTriggerVoice, activeMode, idToken);
 
@@ -484,7 +544,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         let hadErrorEvent = false;
 
         ws.onopen = () => {
-          if (cancelled) return;
+          if (!isCurrentInit()) return;
           ensureAudioContextsRunning();
           if (pingIntervalRef.current !== null) {
             window.clearInterval(pingIntervalRef.current);
@@ -501,7 +561,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         };
 
         ws.onmessage = (event) => {
-          if (cancelled) return;
+          if (!isCurrentInit()) return;
           try {
             const msg = JSON.parse(String(event.data)) as {
               ready?: boolean;
@@ -701,15 +761,11 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
 
     async function startLiveCamera() {
       stopCameraStream();
+      await new Promise((r) => setTimeout(r, 80));
+      if (cancelled) return;
+
       try {
-        const camStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: facingMode },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: false,
-        });
+        const camStream = await acquireCameraStream(facingMode);
         if (cancelled) {
           for (const t of camStream.getTracks()) t.stop();
           return;
@@ -824,7 +880,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
             autoPlay
             playsInline
             muted
-            className="h-full w-full object-cover"
+            className={`h-full w-full object-cover ${facingMode === 'user' ? '-scale-x-100' : ''}`}
           />
           <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/75 via-black/35 to-transparent" />
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-52 bg-gradient-to-t from-black/85 via-black/45 to-transparent" />
@@ -857,20 +913,6 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {isCameraOn && (
-            <button
-              type="button"
-              onClick={() =>
-                setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
-              }
-              title="Ganti kamera depan/belakang"
-              aria-label="Ganti kamera depan/belakang"
-              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-md hover:bg-black/75 transition-colors cursor-pointer"
-            >
-              <SwitchCamera className="h-4 w-4" />
-            </button>
-          )}
-
           <label htmlFor="live-voice-select" className="sr-only">
             Pilih suara asisten
           </label>
@@ -1004,7 +1046,8 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           <div className="mb-2 text-center">
             <p className="inline-block rounded-full bg-black/50 px-3.5 py-1.5 text-xs font-medium text-zinc-100 backdrop-blur-md">
               {status === 'connecting' && `Menghubungkan kamera ke ${activeVoiceLabel}...`}
-              {status === 'listening' && `Kamera aktif (${activeVoiceLabel}) · Silakan berbicara`}
+              {status === 'listening' &&
+                `Kamera ${facingMode === 'user' ? 'Depan' : 'Belakang'} (${activeVoiceLabel}) · Silakan berbicara`}
               {status === 'speaking' &&
                 (voice === 'owie'
                   ? showTranscriptBox
@@ -1038,7 +1081,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
       </main>
 
       {/* Bottom Gemini Live Control Dock */}
-      <footer className="relative z-10 flex shrink-0 items-center justify-center gap-4 px-4 pb-7 pt-3 sm:gap-5 sm:pb-8">
+      <footer className="relative z-10 flex shrink-0 items-center justify-center gap-3.5 px-4 pb-7 pt-3 sm:gap-5 sm:pb-8">
         <button
           type="button"
           onClick={() => setIsCameraOn((prev) => !prev)}
@@ -1052,6 +1095,31 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         >
           {isCameraOn ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
         </button>
+
+        {isCameraOn && (
+          <button
+            type="button"
+            onClick={() =>
+              setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
+            }
+            title={
+              facingMode === 'environment'
+                ? 'Pindah ke kamera depan (selfie)'
+                : 'Pindah ke kamera belakang'
+            }
+            aria-label={
+              facingMode === 'environment'
+                ? 'Pindah ke kamera depan (selfie)'
+                : 'Pindah ke kamera belakang'
+            }
+            className="inline-flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-full border border-white/25 bg-black/50 text-white backdrop-blur-md hover:bg-white/20 active:scale-95 transition-all cursor-pointer"
+          >
+            <SwitchCamera className="h-5 w-5" />
+            <span className="text-[9px] font-semibold leading-none tracking-tight text-zinc-200">
+              {facingMode === 'user' ? 'Depan' : 'Belakang'}
+            </span>
+          </button>
+        )}
 
         <button
           type="button"

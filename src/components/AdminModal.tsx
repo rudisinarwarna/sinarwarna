@@ -43,8 +43,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               </h2>
               <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                 {adminLevel === 'admin'
-                  ? 'Kelola akun pengguna biasa'
-                  : 'Kelola akun pengguna, level admin, & pengingat pribadi AI'}
+                  ? 'Kelola akun pengguna biasa & pengingat admin AI'
+                  : 'Kelola akun pengguna, level admin, & pengingat admin AI'}
               </p>
             </div>
           </div>

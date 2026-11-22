@@ -101,7 +101,7 @@
     },
     "AdminMemory": {
       "title": "AdminMemory",
-      "description": "Shared private AI memory visible exclusively to Admin+ and Primary Admin.",
+      "description": "Shared admin AI memory visible and writable across Admin, Admin+, and Primary Admin.",
       "type": "object",
       "properties": {
         "id": {
@@ -122,6 +122,11 @@
           "minLength": 1,
           "maxLength": 2000,
           "description": "Private memory fact known across Admin+ and Primary Admin."
+        },
+        "imageData": {
+          "type": "string",
+          "maxLength": 160000,
+          "description": "Optional compressed JPEG base64 reference photo for AI visual/camera recognition."
         },
         "createdBy": {
           "type": "string",
@@ -151,6 +156,15 @@
       "type": "object",
       "properties": {
         "seededDefaultMemories": {
+          "type": "boolean"
+        },
+        "seededPhotoMemories": {
+          "type": "boolean"
+        },
+        "seededFounderPhoto": {
+          "type": "boolean"
+        },
+        "seededFounderAngkui": {
           "type": "boolean"
         },
         "updatedBy": {
@@ -376,11 +390,11 @@
     },
     "/adminMemories/{memoryId}": {
       "schema": { "$ref": "#/entities/AdminMemory" },
-      "description": "Shared private AI memories visible and writable exclusively by Admin+ and Primary Admin."
+      "description": "Shared admin AI memories visible and writable across Admin, Admin+, and Primary Admin."
     },
     "/adminMeta/{docId}": {
       "schema": { "$ref": "#/entities/AdminSeedMeta" },
-      "description": "Admin+ seed status document."
+      "description": "Admin seed status document accessible across Admin, Admin+, and Primary Admin."
     },
     "/publicMemories/{memoryId}": {
       "schema": { "$ref": "#/entities/PublicMemory" },

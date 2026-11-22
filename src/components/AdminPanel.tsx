@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
   AlertCircle,
@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Crown,
   Globe,
+  ImagePlus,
   Mic,
   Plus,
   RotateCcw,
@@ -20,6 +21,7 @@ import {
   Trash2,
   UserCheck,
   Users,
+  X,
   Zap,
 } from 'lucide-react';
 import {
@@ -66,7 +68,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   adminLevel = 'admin',
   compact = false,
 }) => {
-  const canAccessMemories = adminLevel === 'primary' || adminLevel === 'admin_plus';
+  const canAccessMemories =
+    adminLevel === 'primary' || adminLevel === 'admin_plus' || adminLevel === 'admin';
+  const canManageLiveGreeting = adminLevel === 'primary' || adminLevel === 'admin_plus';
 
   const [subTab, setSubTab] = useState<'users' | 'publicMemories' | 'liveGreeting' | 'memories'>('users');
   const [users, setUsers] = useState<ManagedUserRecord[]>([]);
@@ -82,7 +86,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
+  const [newPhotoBase64, setNewPhotoBase64] = useState<string | null>(null);
   const [savingMemory, setSavingMemory] = useState(false);
+  const memoryPhotoInputRef = useRef<HTMLInputElement>(null);
 
   const [newPublicTitle, setNewPublicTitle] = useState('');
   const [newPublicContent, setNewPublicContent] = useState('');
@@ -99,10 +105,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
-    if (!canAccessMemories && (subTab === 'liveGreeting' || subTab === 'memories')) {
+    if (!canManageLiveGreeting && subTab === 'liveGreeting') {
+      setSubTab('users');
+    } else if (!canAccessMemories && subTab === 'memories') {
       setSubTab('users');
     }
-  }, [canAccessMemories, subTab]);
+  }, [canAccessMemories, canManageLiveGreeting, subTab]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -141,6 +149,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         (list) => setMemories(list),
         (err) => setFeedback({ type: 'err', text: err.message })
       );
+    } else {
+      setMemories([]);
+    }
+
+    if (canManageLiveGreeting) {
       unsubLiveGreeting = subscribeLiveOpeningGreeting(
         (text) => {
           setSavedLiveGreeting(text);
@@ -149,7 +162,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         (err) => setFeedback({ type: 'err', text: err.message })
       );
     } else {
-      setMemories([]);
       setSavedLiveGreeting('');
       setLiveGreetingInput('');
     }
@@ -161,7 +173,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       unsubMemories?.();
       unsubLiveGreeting?.();
     };
-  }, [adminLevel, canAccessMemories, currentUser]);
+  }, [adminLevel, canAccessMemories, canManageLiveGreeting, currentUser]);
 
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
@@ -303,6 +315,65 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     void handleToggleFreewill(false);
   };
 
+  const compressMemoryPhotoFile = async (file: File): Promise<string> => {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Gagal membaca file foto.'));
+      reader.readAsDataURL(file);
+    });
+
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('Format foto tidak valid.'));
+      el.src = dataUrl;
+    });
+
+    const maxSide = 640;
+    const scale = Math.min(1, maxSide / Math.max(img.width || 1, img.height || 1));
+    const width = Math.max(1, Math.round((img.width || 1) * scale));
+    const height = Math.max(1, Math.round((img.height || 1) * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Peramban tidak mendukung pemrosesan foto.');
+    }
+    ctx.drawImage(img, 0, 0, width, height);
+
+    for (const quality of [0.8, 0.68, 0.55, 0.42]) {
+      const jpegUrl = canvas.toDataURL('image/jpeg', quality);
+      const b64 = jpegUrl.split(',')[1] || '';
+      if (b64.length > 0 && b64.length <= 150000) {
+        return b64;
+      }
+    }
+    throw new Error('Ukuran foto terlalu besar setelah dikompresi. Gunakan foto lain.');
+  };
+
+  const handleSelectMemoryPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setFeedback({ type: 'err', text: 'Format foto referensi harus JPG, PNG, atau WEBP.' });
+      return;
+    }
+    setFeedback(null);
+    try {
+      const b64 = await compressMemoryPhotoFile(file);
+      setNewPhotoBase64(b64);
+    } catch (err) {
+      setFeedback({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Gagal memproses foto referensi.',
+      });
+    }
+  };
+
   const handleAddMemory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !canAccessMemories || savingMemory) return;
@@ -312,13 +383,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
     setSavingMemory(true);
     setFeedback(null);
-    const memTitle = newTitle.trim() || 'Pengingat Pribadi';
+    const memTitle = newTitle.trim() || 'Pengingat Admin';
     const memContent = newContent.trim();
     try {
       await addAdminMemory({
         adminUser: currentUser,
         title: memTitle,
         content: memContent,
+        ...(newPhotoBase64 ? { imageData: newPhotoBase64 } : {}),
       });
       if (adminLevel === 'primary' && freewillEnabled) {
         await setFreewillMode({
@@ -329,9 +401,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       }
       setNewTitle('');
       setNewContent('');
+      setNewPhotoBase64(null);
       setFeedback({
         type: 'ok',
-        text: 'Pengingat pribadi disimpan dan disinkronkan ke Admin+ & Admin Utama.',
+        text: 'Pengingat admin disimpan dan disinkronkan ke semua Admin (Admin, Admin+, & Admin Utama).',
       });
     } catch (err) {
       setFeedback({
@@ -425,7 +498,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleSaveLiveGreeting = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser || !canAccessMemories || savingLiveGreeting) return;
+    if (!currentUser || !canManageLiveGreeting || savingLiveGreeting) return;
     setSavingLiveGreeting(true);
     setFeedback(null);
     const nextText = liveGreetingInput.trim().slice(0, 500);
@@ -448,7 +521,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   const handleResetLiveGreeting = async () => {
-    if (!currentUser || !canAccessMemories || savingLiveGreeting) return;
+    if (!currentUser || !canManageLiveGreeting || savingLiveGreeting) return;
     setSavingLiveGreeting(true);
     setFeedback(null);
     try {
@@ -479,11 +552,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <VerifiedBlueBadge size="xs" title="Admin Terverifikasi" />
           <span className="truncate text-zinc-600 dark:text-zinc-300">
             {adminLevel === 'primary' &&
-              'Akses penuh: FREEWILL, semua level admin, pengingat umum & pribadi.'}
+              'Akses penuh: FREEWILL, semua level admin, pengingat umum, sapaan Live & pengingat admin.'}
             {adminLevel === 'admin_plus' &&
-              'Kelola User, Admin biasa, pengingat umum, sapaan Live, & pengingat pribadi.'}
+              'Kelola User, Admin biasa, pengingat umum, sapaan Live, & pengingat admin.'}
             {adminLevel === 'admin' &&
-              'Kelola User biasa & Pengingat Umum (tidak bisa ubah sesama Admin).'}
+              'Kelola User biasa, Pengingat Umum, & Pengingat Admin (tidak bisa ubah sesama Admin).'}
           </span>
         </div>
       </div>
@@ -546,7 +619,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div className="space-y-1">
                   <p className="font-bold">Peringatan: Hidupkan Mode FREEWILL?</p>
                   <p className="text-[11px] leading-relaxed text-amber-900/90 dark:text-amber-200/90">
-                    Semua pengguna terdaftar dan tamu yang belum daftar akan langsung mendapatkan efek level Admin (akses pengingat pribadi &amp; gaya bahasa semi-gaul AI). Lanjutkan mengaktifkan FREEWILL?
+                    Semua pengguna terdaftar dan tamu yang belum daftar akan langsung mendapatkan efek level Admin (akses pengingat admin &amp; gaya bahasa semi-gaul AI). Lanjutkan mengaktifkan FREEWILL?
                   </p>
                 </div>
               </div>
@@ -574,10 +647,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
-      {/* Sub-navigation: Semua Admin bisa akses Pengguna & Pengingat Umum; Admin+ & Admin Utama tambah Sapaan Live & Pengingat Pribadi */}
+      {/* Sub-navigation: Semua Admin bisa akses Pengguna, Pengingat Umum, & Pengingat Admin; Admin+ & Admin Utama tambah Sapaan Live */}
       <div
         className={`grid gap-1.5 rounded-2xl bg-zinc-100 p-1.5 dark:bg-[#0B0F1A] ${
-          canAccessMemories ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2'
+          canManageLiveGreeting ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'
         }`}
       >
         <button
@@ -606,33 +679,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <span>Pengingat Umum ({publicMemories.length})</span>
         </button>
 
+        {canManageLiveGreeting && (
+          <button
+            type="button"
+            onClick={() => setSubTab('liveGreeting')}
+            className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+              subTab === 'liveGreeting'
+                ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
+                : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+            }`}
+          >
+            <Mic className="h-3.5 w-3.5 text-[#0A36FF] dark:text-blue-400 shrink-0" />
+            <span>Sapaan Live</span>
+          </button>
+        )}
+
         {canAccessMemories && (
-          <>
-            <button
-              type="button"
-              onClick={() => setSubTab('liveGreeting')}
-              className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-                subTab === 'liveGreeting'
-                  ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
-                  : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
-              }`}
-            >
-              <Mic className="h-3.5 w-3.5 text-[#0A36FF] dark:text-blue-400 shrink-0" />
-              <span>Sapaan Live</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setSubTab('memories')}
-              className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-                subTab === 'memories'
-                  ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
-                  : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
-              }`}
-            >
-              <BookOpen className="h-3.5 w-3.5 text-[#E51D2B] dark:text-[#FF4D5A] shrink-0" />
-              <span>Pengingat Pribadi ({memories.length})</span>
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => setSubTab('memories')}
+            className={`flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-2 text-[11px] sm:text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+              subTab === 'memories'
+                ? 'bg-white text-zinc-900 shadow-sm dark:bg-[#1A2238] dark:text-white'
+                : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+            }`}
+          >
+            <BookOpen className="h-3.5 w-3.5 text-[#E51D2B] dark:text-[#FF4D5A] shrink-0" />
+            <span>Pengingat Admin ({memories.length})</span>
+          </button>
         )}
       </div>
 
@@ -1052,9 +1126,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       ) : (
         <div className="space-y-3">
           <p className="rounded-xl border border-blue-500/20 bg-blue-50/70 dark:bg-blue-950/25 px-3 py-2 text-[11px] leading-relaxed text-zinc-700 dark:text-zinc-300">
-            <strong>Pengingat Pribadi (Khusus Admin+ &amp; Admin Utama):</strong> Semua pengingat di
-            sini aktif saat Admin+ atau Admin Utama login dan tersinkron otomatis. Admin biasa
-            tidak dapat melihat bagian ini.
+            <strong>Pengingat Admin (Untuk Admin, Admin+, &amp; Admin Utama):</strong> Semua pengingat
+            &amp; foto referensi wajah/objek di sini aktif di Chat maupun mode Kamera Live saat
+            akun Admin, Admin+, atau Admin Utama login. Pengguna biasa dan tamu tidak dapat melihat bagian ini.
           </p>
 
           <form
@@ -1066,7 +1140,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
               maxLength={120}
-              placeholder="Judul singkat (misal: Jadwal Meeting / Info Keluarga)"
+              placeholder="Judul singkat (misal: Foto Wajah / Jadwal / Info Keluarga)"
               className="h-9 w-full rounded-xl border border-zinc-200 dark:border-[#2A3350] bg-white dark:bg-[#111626] px-3 text-xs text-zinc-900 placeholder:text-zinc-400 dark:text-zinc-100 focus:outline-none focus:border-blue-500"
             />
             <textarea
@@ -1074,23 +1148,64 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               onChange={(e) => setNewContent(e.target.value)}
               rows={2}
               maxLength={2000}
-              placeholder="Tulis hal yang ingin selalu diingat AI..."
+              placeholder="Tulis nama orang, hubungan, ciri, atau hal yang ingin selalu diingat AI..."
               className="w-full rounded-xl border border-zinc-200 dark:border-[#2A3350] bg-white dark:bg-[#111626] px-3 py-2 text-xs text-zinc-900 placeholder:text-zinc-400 dark:text-zinc-100 focus:outline-none focus:border-blue-500 resize-none"
             />
+
+            <input
+              ref={memoryPhotoInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => void handleSelectMemoryPhoto(e)}
+            />
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => memoryPhotoInputRef.current?.click()}
+                className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-zinc-200 dark:border-[#2A3350] bg-white dark:bg-[#14192B] px-3 text-[11px] font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-[#1C233B] cursor-pointer"
+              >
+                <ImagePlus className="h-3.5 w-3.5 text-blue-500" />
+                <span>{newPhotoBase64 ? 'Ganti Foto Referensi' : 'Lampirkan Foto (Opsional)'}</span>
+              </button>
+
+              {newPhotoBase64 && (
+                <div className="relative inline-flex items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/5 p-1 pr-2">
+                  <img
+                    src={`data:image/jpeg;base64,${newPhotoBase64}`}
+                    alt="Pratinjau foto referensi"
+                    className="h-9 w-9 rounded-lg object-cover"
+                  />
+                  <span className="text-[11px] text-zinc-600 dark:text-zinc-300">
+                    Siap dikenali Live Kamera
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setNewPhotoBase64(null)}
+                    aria-label="Hapus foto referensi"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-red-500/90 text-white hover:bg-red-600 cursor-pointer"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+            </div>
+
             <button
               type="submit"
               disabled={savingMemory || !newContent.trim()}
               className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] px-3 text-xs font-semibold text-white hover:opacity-95 disabled:opacity-50 transition-opacity cursor-pointer"
             >
               <Plus className="h-3.5 w-3.5" />
-              <span>{savingMemory ? 'Menyimpan...' : 'Tambah Pengingat Pribadi'}</span>
+              <span>{savingMemory ? 'Menyimpan...' : 'Tambah Pengingat Admin'}</span>
             </button>
           </form>
 
           <div className={`space-y-2 overflow-y-auto ${compact ? 'max-h-[34dvh]' : 'max-h-[40dvh]'}`}>
             {memories.length === 0 ? (
               <p className="rounded-xl border border-dashed border-zinc-200 dark:border-[#242C44] p-4 text-center text-xs text-zinc-500">
-                Belum ada pengingat pribadi tersimpan.
+                Belum ada pengingat admin tersimpan.
               </p>
             ) : (
               memories.map((mem) => {
@@ -1101,19 +1216,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     key={mem.id}
                     className="rounded-2xl border border-zinc-200/90 dark:border-[#242C44] bg-zinc-50/70 dark:bg-[#0B0F1A] p-3 space-y-1.5"
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold text-zinc-900 dark:text-white">
-                          {mem.title}
-                        </p>
-                        <p className="mt-0.5 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
-                          {mem.content}
-                        </p>
-                        {mem.createdByEmail && (
-                          <p className="mt-1 text-[10px] text-zinc-400">
-                            Ditambahkan oleh {mem.createdByEmail}
-                          </p>
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        {mem.imageData && (
+                          <img
+                            src={`data:image/jpeg;base64,${mem.imageData}`}
+                            alt={mem.title}
+                            className="h-14 w-14 shrink-0 rounded-xl border border-blue-500/30 object-cover"
+                          />
                         )}
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-zinc-900 dark:text-white">
+                            {mem.title}
+                          </p>
+                          <p className="mt-0.5 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
+                            {mem.content}
+                          </p>
+                          {mem.createdByEmail && (
+                            <p className="mt-1 text-[10px] text-zinc-400">
+                              Ditambahkan oleh {mem.createdByEmail}
+                            </p>
+                          )}
+                        </div>
                       </div>
 
                       {confirming ? (
@@ -1140,7 +1264,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           type="button"
                           disabled={isBusy}
                           onClick={() => setConfirmDeleteMemId(mem.id)}
-                          title="Hapus pengingat pribadi"
+                          title="Hapus pengingat admin"
                           aria-label={`Hapus pengingat ${mem.title}`}
                           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-red-500/15 hover:text-red-600 dark:hover:text-red-400 transition-colors cursor-pointer"
                         >

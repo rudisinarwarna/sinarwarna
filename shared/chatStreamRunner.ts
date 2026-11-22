@@ -1,4 +1,5 @@
 import { type Content, type FunctionCall, type GoogleGenAI, type Part } from '@google/genai';
+import { DEFAULT_ADMIN_PHOTO_MEMORIES } from './adminPhotoMemories.ts';
 import {
   deleteAdminMemoriesByKeywordServer,
   deletePublicMemoriesByKeywordServer,
@@ -13,6 +14,7 @@ import {
   getChatToolsForUser,
   isRateLimitError,
   isTransientError,
+  type AdminMemoryItem,
 } from './sinarWarnaPrompt.ts';
 
 export interface ChatStreamEvent {
@@ -75,18 +77,94 @@ export async function runChatStreamWithTools(params: {
       authContext.uid
   );
 
-  const effectiveAdminMemories = authContext.canAccessAdminMemories
-    ? authContext.adminMemories.length > 0 ||
-      (authContext.seedMetaExists && authContext.adminMemoriesFetchOk)
-      ? [...authContext.adminMemories]
-      : [...DEFAULT_ADMIN_PRIVATE_MEMORIES]
-    : authContext.freewill.enabled && !authContext.freewill.memoriesSummary
-    ? [...DEFAULT_ADMIN_PRIVATE_MEMORIES]
-    : [];
+  const effectiveAdminMemories: AdminMemoryItem[] = (() => {
+    const normalizeFounderNick = (item: AdminMemoryItem): AdminMemoryItem => {
+      if (
+        !authContext.seedFounderAngkuiMetaExists &&
+        item.id === 'mem_default_foto_rudi_hongkwe' &&
+        item.content.includes('memanggilnya "Kui"')
+      ) {
+        return {
+          ...item,
+          content: item.content.replace('memanggilnya "Kui"', 'memanggilnya "Angkui"'),
+        };
+      }
+      return item;
+    };
+
+    if (authContext.canAccessAdminMemories) {
+      const base: AdminMemoryItem[] =
+        authContext.adminMemories.length > 0 ||
+        (authContext.seedMetaExists && authContext.adminMemoriesFetchOk)
+          ? authContext.adminMemories.map(normalizeFounderNick)
+          : [...DEFAULT_ADMIN_PRIVATE_MEMORIES];
+      const existingIds = new Set(base.map((m) => m.id));
+      for (const p of DEFAULT_ADMIN_PHOTO_MEMORIES) {
+        const shouldIncludeFounderFallback =
+          p.id === 'mem_default_foto_rudi_hongkwe' && !authContext.seedFounderPhotoMetaExists;
+        const shouldIncludeGeneralFallback =
+          !authContext.seedPhotoMetaExists || !authContext.adminMemoriesFetchOk;
+        if ((shouldIncludeFounderFallback || shouldIncludeGeneralFallback) && !existingIds.has(p.id)) {
+          base.push(p);
+        }
+      }
+      return base;
+    }
+    if (authContext.freewill.enabled) {
+      return !authContext.freewill.memoriesSummary
+        ? [...DEFAULT_ADMIN_PRIVATE_MEMORIES, ...DEFAULT_ADMIN_PHOTO_MEMORIES]
+        : [...DEFAULT_ADMIN_PHOTO_MEMORIES];
+    }
+    return [];
+  })();
 
   const effectivePublicMemories = [...authContext.publicMemories];
 
-  let workingContents: Content[] = [...params.contents];
+  const photoMemories = includePrivateMemories
+    ? effectiveAdminMemories
+        .filter((m): m is AdminMemoryItem & { imageData: string } => Boolean(m.imageData))
+        .slice(0, 6)
+    : [];
+
+  const photoPrimerTurns: Content[] = [];
+  if (photoMemories.length > 0) {
+    const photoParts: Part[] = [
+      {
+        text: 'REFERENSI FOTO PENGINGAT ADMIN (GUNAKAN UNTUK MENGENALI STRUKTUR INTI WAJAH ATAU OBJEK SAAT PENGGUNA MENGIRIM FOTO — TETAP KENALI WALAU GANTI GAYA RAMBUT ATAU MEMAKAI/MELEPAS KACAMATA):',
+      },
+    ];
+    for (const pm of photoMemories) {
+      photoParts.push({ text: `Foto Referensi [${pm.title}]: ${pm.content}` });
+      photoParts.push({ inlineData: { mimeType: 'image/jpeg', data: pm.imageData } });
+    }
+    photoPrimerTurns.push({ role: 'user', parts: photoParts });
+    photoPrimerTurns.push({
+      role: 'model',
+      parts: [
+        {
+          text: 'Baik, saya sudah mengingat semua foto referensi pengingat admin beserta keterangannya.',
+        },
+      ],
+    });
+  }
+
+  let latestAttachedPhotoBase64: string | undefined;
+  for (let i = params.contents.length - 1; i >= 0; i--) {
+    if (params.contents[i].role === 'user') {
+      const parts = params.contents[i].parts || [];
+      for (const p of parts) {
+        const mime = p.inlineData?.mimeType || '';
+        const data = p.inlineData?.data || '';
+        if (mime.startsWith('image/') && data.length > 0 && data.length <= 160000) {
+          latestAttachedPhotoBase64 = data;
+          break;
+        }
+      }
+      break;
+    }
+  }
+
+  let workingContents: Content[] = [...photoPrimerTurns, ...params.contents];
   const attempts = getChatAttempts(thinkingDepth);
   const tools = getChatToolsForUser({
     canManageAdminMemories,
@@ -196,14 +274,16 @@ export async function runChatStreamWithTools(params: {
       const args = (fc.args || {}) as Record<string, unknown>;
 
       if (name === 'save_admin_memory' && canManageAdminMemories) {
-        const title = String(args.title || 'Pengingat Pribadi').trim();
+        const title = String(args.title || 'Pengingat Admin').trim();
         const content = String(args.content || '').trim();
+        const shouldAttachPhoto = args.useAttachedPhoto !== false && Boolean(latestAttachedPhotoBase64);
         const saved = await saveAdminMemoryServer({
           idToken: authContext.idToken,
           uid: authContext.uid,
           email: authContext.email || '',
           title,
           content,
+          ...(shouldAttachPhoto ? { imageData: latestAttachedPhotoBase64 } : {}),
         });
         if (saved.ok && saved.memory) {
           effectiveAdminMemories.push(saved.memory);

@@ -125,21 +125,56 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
         continue;
       }
 
-      const dataUrl = await new Promise<string>((resolve, reject) => {
+      const rawDataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result || ''));
         reader.onerror = () => reject(new Error('Gagal membaca file'));
         reader.readAsDataURL(file);
       });
 
-      const base64Data = dataUrl.split(',')[1] || '';
+      let finalMime = file.type;
+      let finalPreviewUrl = rawDataUrl;
+      let base64Data = rawDataUrl.split(',')[1] || '';
+
+      if (base64Data.length > 135000 && file.type !== 'image/gif') {
+        try {
+          const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const el = new Image();
+            el.onload = () => resolve(el);
+            el.onerror = () => reject(new Error('Gagal memuat gambar'));
+            el.src = rawDataUrl;
+          });
+          const maxSide = 900;
+          const scale = Math.min(1, maxSide / Math.max(img.width || 1, img.height || 1));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round((img.width || 1) * scale));
+          canvas.height = Math.max(1, Math.round((img.height || 1) * scale));
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            for (const q of [0.82, 0.7, 0.56, 0.44]) {
+              const candidateUrl = canvas.toDataURL('image/jpeg', q);
+              const candidateB64 = candidateUrl.split(',')[1] || '';
+              if (candidateB64.length > 0 && candidateB64.length <= 145000) {
+                finalMime = 'image/jpeg';
+                finalPreviewUrl = candidateUrl;
+                base64Data = candidateB64;
+                break;
+              }
+            }
+          }
+        } catch {
+          // Keep original attachment if canvas resize fails
+        }
+      }
+
       if (base64Data) {
         nextAttachments.push({
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           name: file.name,
-          mimeType: file.type,
+          mimeType: finalMime,
           data: base64Data,
-          previewUrl: dataUrl,
+          previewUrl: finalPreviewUrl,
         });
       }
     }

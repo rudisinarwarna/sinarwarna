@@ -22,6 +22,7 @@ export interface AdminMemoryRecord {
   id: string;
   title: string;
   content: string;
+  imageData?: string;
 }
 
 export type AdminLevel = 'none' | 'admin' | 'admin_plus' | 'primary';
@@ -45,6 +46,9 @@ export interface ServerAuthContext {
   publicMemories: AdminMemoryRecord[];
   freewill: FreewillServerConfig;
   seedMetaExists: boolean;
+  seedPhotoMetaExists: boolean;
+  seedFounderPhotoMetaExists: boolean;
+  seedFounderAngkuiMetaExists: boolean;
   idToken: string | null;
 }
 
@@ -206,11 +210,19 @@ export async function fetchAdminMemoriesServerWithStatus(
     if (!res.ok) return { ok: false, memories: [] };
     const data = (await res.json()) as { documents?: FirestoreRestDoc[] };
     const memories = (data.documents || [])
-      .map((d) => ({
-        id: d.fields?.id?.stringValue || getDocIdFromName(d.name),
-        title: d.fields?.title?.stringValue || 'Pengingat',
-        content: d.fields?.content?.stringValue || '',
-      }))
+      .map((d) => {
+        const rawImage = d.fields?.imageData?.stringValue;
+        const imageData =
+          typeof rawImage === 'string' && rawImage.length > 0 && rawImage.length <= 160000
+            ? rawImage
+            : undefined;
+        return {
+          id: d.fields?.id?.stringValue || getDocIdFromName(d.name),
+          title: d.fields?.title?.stringValue || 'Pengingat',
+          content: d.fields?.content?.stringValue || '',
+          ...(imageData ? { imageData } : {}),
+        };
+      })
       .filter((m) => m.id && m.content);
     return { ok: true, memories };
   } catch {
@@ -318,6 +330,9 @@ export async function resolveServerAuthContext(
     publicMemories,
     freewill,
     seedMetaExists: false,
+    seedPhotoMetaExists: false,
+    seedFounderPhotoMetaExists: false,
+    seedFounderAngkuiMetaExists: false,
     idToken: null,
   };
 
@@ -370,12 +385,15 @@ export async function resolveServerAuthContext(
 
   const isAdmin = Boolean(claims.emailVerified && adminLevel !== 'none' && !isBlocked);
   const canAccessAdminMemories = Boolean(
-    isAdmin && (adminLevel === 'primary' || adminLevel === 'admin_plus')
+    isAdmin && (adminLevel === 'primary' || adminLevel === 'admin_plus' || adminLevel === 'admin')
   );
 
   let adminMemories: AdminMemoryRecord[] = [];
   let adminMemoriesFetchOk = false;
   let seedMetaExists = false;
+  let seedPhotoMetaExists = false;
+  let seedFounderPhotoMetaExists = false;
+  let seedFounderAngkuiMetaExists = false;
 
   if (canAccessAdminMemories) {
     const base = firestoreDocsBaseUrl();
@@ -387,6 +405,12 @@ export async function resolveServerAuthContext(
     adminMemories = memoriesResult.memories;
     adminMemoriesFetchOk = memoriesResult.ok;
     seedMetaExists = Boolean(seedRes && seedRes.ok);
+    if (seedRes && seedRes.ok) {
+      const seedDoc = (await seedRes.json().catch(() => null)) as FirestoreRestDoc | null;
+      seedPhotoMetaExists = seedDoc?.fields?.seededPhotoMemories?.booleanValue === true;
+      seedFounderPhotoMetaExists = seedDoc?.fields?.seededFounderPhoto?.booleanValue === true;
+      seedFounderAngkuiMetaExists = seedDoc?.fields?.seededFounderAngkui?.booleanValue === true;
+    }
   }
 
   return {
@@ -403,6 +427,9 @@ export async function resolveServerAuthContext(
     publicMemories,
     freewill,
     seedMetaExists,
+    seedPhotoMetaExists,
+    seedFounderPhotoMetaExists,
+    seedFounderAngkuiMetaExists,
     idToken,
   };
 }
@@ -418,16 +445,31 @@ export async function saveAdminMemoryServer(params: {
   email: string;
   title: string;
   content: string;
+  imageData?: string;
 }): Promise<{ ok: boolean; memory?: AdminMemoryRecord; error?: string }> {
   const memId = sanitizeFirestoreId(`mem_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
-  const title = (params.title || 'Pengingat Pribadi').trim().slice(0, 120) || 'Pengingat Pribadi';
+  const title = (params.title || 'Pengingat Admin').trim().slice(0, 120) || 'Pengingat Admin';
   const content = (params.content || '').trim().slice(0, 2000);
   if (!content) {
     return { ok: false, error: 'Isi pengingat tidak boleh kosong.' };
   }
 
+  const rawPhoto = (params.imageData || '').replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '').trim();
+  const validPhoto = rawPhoto.length > 0 && rawPhoto.length <= 160000 ? rawPhoto : '';
+
   const docName = `projects/${FIREBASE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents/adminMemories/${memId}`;
   const url = `${firestoreDocsBaseUrl()}:commit`;
+
+  const fields: Record<string, { stringValue: string }> = {
+    id: { stringValue: memId },
+    title: { stringValue: title },
+    content: { stringValue: content },
+    createdBy: { stringValue: params.uid.slice(0, 128) },
+    createdByEmail: { stringValue: (params.email || '').slice(0, 200) },
+  };
+  if (validPhoto) {
+    fields.imageData = { stringValue: validPhoto };
+  }
 
   const res = await fetch(url, {
     method: 'POST',
@@ -440,13 +482,7 @@ export async function saveAdminMemoryServer(params: {
         {
           update: {
             name: docName,
-            fields: {
-              id: { stringValue: memId },
-              title: { stringValue: title },
-              content: { stringValue: content },
-              createdBy: { stringValue: params.uid.slice(0, 128) },
-              createdByEmail: { stringValue: (params.email || '').slice(0, 200) },
-            },
+            fields,
           },
           currentDocument: { exists: false },
           updateTransforms: [
@@ -465,7 +501,12 @@ export async function saveAdminMemoryServer(params: {
 
   return {
     ok: true,
-    memory: { id: memId, title, content },
+    memory: {
+      id: memId,
+      title,
+      content,
+      ...(validPhoto ? { imageData: validPhoto } : {}),
+    },
   };
 }
 
@@ -495,7 +536,7 @@ export async function deleteAdminMemoriesByKeywordServer(params: {
     return {
       ok: false,
       deletedTitles: [],
-      error: `Tidak ditemukan pengingat pribadi yang cocok dengan "${params.keyword}".`,
+      error: `Tidak ditemukan pengingat admin yang cocok dengan "${params.keyword}".`,
     };
   }
 

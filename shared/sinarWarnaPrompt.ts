@@ -11,9 +11,10 @@ export interface AdminMemoryItem {
   id: string;
   title: string;
   content: string;
+  imageData?: string;
 }
 
-export type CanonicalVoiceId = 'santi' | 'cynthia' | 'awen' | 'cyndi' | 'owie';
+export type CanonicalVoiceId = 'awen' | 'santi' | 'cynthia' | 'cyndi' | 'owie';
 
 /**
  * Pengingat Toko (Publik - untuk semua pengguna).
@@ -30,7 +31,7 @@ export const SINAR_WARNA_PUBLIC_STORE_KNOWLEDGE = [
 ].join(' ');
 
 /**
- * Pengingat Pribadi Default (Hanya untuk Admin, disinkronkan via Firestore /adminMemories).
+ * Pengingat Admin Default (Untuk Admin, Admin+, & Admin Utama, disinkronkan via Firestore /adminMemories).
  */
 export const DEFAULT_ADMIN_PRIVATE_MEMORIES: AdminMemoryItem[] = [
   {
@@ -105,7 +106,7 @@ export const ADMIN_MEMORY_DECLARATIONS: FunctionDeclaration[] = [
   {
     name: 'save_admin_memory',
     description:
-      'Menyimpan pengingat pribadi baru ke database admin bersama agar diketahui oleh semua admin Sinar Warna.',
+      'Menyimpan pengingat admin baru (termasuk foto referensi wajah/objek jika admin melampirkan foto) ke database admin bersama agar diingat oleh semua admin dan dikenali kamera Live.',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -115,7 +116,12 @@ export const ADMIN_MEMORY_DECLARATIONS: FunctionDeclaration[] = [
         },
         content: {
           type: Type.STRING,
-          description: 'Isi lengkap fakta atau pengingat yang diminta admin untuk diingat.',
+          description: 'Isi lengkap fakta, ciri wajah/orang, atau pengingat yang diminta admin untuk diingat.',
+        },
+        useAttachedPhoto: {
+          type: Type.BOOLEAN,
+          description:
+            'Set true jika admin melampirkan foto di pesan ini agar fotonya ikut tersimpan sebagai referensi pengenalan kamera.',
         },
       },
       required: ['title', 'content'],
@@ -124,7 +130,7 @@ export const ADMIN_MEMORY_DECLARATIONS: FunctionDeclaration[] = [
   {
     name: 'delete_admin_memory',
     description:
-      'Menghapus pengingat pribadi dari database admin bersama berdasarkan kata kunci topik atau isi yang disebutkan admin.',
+      'Menghapus pengingat admin dari database admin bersama berdasarkan kata kunci topik atau isi yang disebutkan admin.',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -178,15 +184,15 @@ export const PUBLIC_MEMORY_DECLARATIONS: FunctionDeclaration[] = [
 export const LIVE_SWITCH_PERSONA_DECLARATION: FunctionDeclaration = {
   name: 'switch_persona',
   description:
-    'Memanggil dan mengalihkan percakapan suara Live ke anggota Sinar Warna lain (santi, cynthia, awen, cyndi, atau owie) ketika pengguna meminta bicara dengan suara tersebut.',
+    'Memanggil dan mengalihkan percakapan suara Live ke anggota Sinar Warna lain (awen, santi, cynthia, cyndi, atau owie) ketika pengguna meminta bicara dengan suara tersebut.',
   parameters: {
     type: Type.OBJECT,
     properties: {
       targetPersona: {
         type: Type.STRING,
-        enum: ['santi', 'cynthia', 'awen', 'cyndi', 'owie'],
+        enum: ['awen', 'santi', 'cynthia', 'cyndi', 'owie'],
         description:
-          'ID suara tujuan: santi (alias Susan/Mia/Sui), cynthia, awen (alias Abun), cyndi, atau owie.',
+          'ID suara tujuan: awen (alias Abun), santi (alias Susan/Mia/Sui), cynthia, cyndi, atau owie.',
       },
     },
     required: ['targetPersona'],
@@ -234,20 +240,23 @@ function formatAdminPrivateMemoriesBlock(
 ): string {
   if (summaryOverride && summaryOverride.trim()) {
     return [
-      'PENGINGAT PRIBADI ADMIN (RAHASIA INTERNAL — HANYA BERLAKU SAAT MODE ADMIN AKTIF):',
+      'PENGINGAT ADMIN (RAHASIA INTERNAL — HANYA BERLAKU SAAT MODE ADMIN AKTIF):',
       summaryOverride.trim(),
     ].join('\n');
   }
   if (!memories || memories.length === 0) {
     return [
-      'PENGINGAT PRIBADI ADMIN (HANYA UNTUK ADMIN):',
-      'Saat ini daftar pengingat pribadi sedang kosong. Kamu tetap menyimpan aturan admin.',
+      'PENGINGAT ADMIN (HANYA UNTUK ADMIN):',
+      'Saat ini daftar pengingat admin sedang kosong. Kamu tetap menyimpan aturan admin.',
     ].join(' ');
   }
 
-  const lines = memories.map((m, idx) => `${idx + 1}. [${m.title}] ${m.content}`);
+  const lines = memories.map((m, idx) => {
+    const photoTag = m.imageData ? ' [MEMILIKI FOTO REFERENSI VISUAL]' : '';
+    return `${idx + 1}. [${m.title}]${photoTag} ${m.content}`;
+  });
   return [
-    'PENGINGAT PRIBADI ADMIN (RAHASIA INTERNAL — HANYA BERLAKU UNTUK ADMIN):',
+    'PENGINGAT ADMIN (RAHASIA INTERNAL — HANYA BERLAKU UNTUK ADMIN):',
     ...lines,
   ].join('\n');
 }
@@ -288,7 +297,12 @@ export function buildChatSystemInstruction(options: {
   }
   if (options.canManageAdminMemories) {
     toolNotes.push(
-      'PENGELOLAAN PENGINGAT PRIBADI: Jika admin meminta menyimpan pengingat pribadi internal admin (seperti keluarga/hal pribadi), panggil `save_admin_memory`. Jika meminta menghapus ingatan pribadi, panggil `delete_admin_memory`.'
+      'PENGELOLAAN PENGINGAT ADMIN: Jika admin meminta menyimpan pengingat admin internal (seperti keluarga, foto wajah orang, atau hal internal admin), panggil `save_admin_memory` (isi `useAttachedPhoto: true` jika admin melampirkan gambar). Jika meminta menghapus pengingat admin, panggil `delete_admin_memory`.'
+    );
+  }
+  if (options.includePrivateMemories) {
+    toolNotes.push(
+      'PENGENALAN FOTO REFERENSI ADMIN: Foto-foto referensi wajah dari Pengingat Admin (Rudi alias Hongkwe sebagai pendiri/pembuat AI ini, Bietjin/Bi Cin, Cynthia, Cyndi, Santi, Awen, serta foto lain dari admin) sudah dilampirkan di memori visualmu. Jika melihat Rudi/Hongkwe, sebut bahwa beliau adalah pendiri/pembuat AI ini (Awen memanggilnya "Angkui", Santi memanggilnya "Hongkwe", Cynthia/Cyndi memanggilnya "Kuku" atau "Kuku Hongkwe"). Fokuslah pada struktur inti wajah (mata, hidung, bibir, rahang, proporsi wajah) sehingga tetap akurat mengenali walau mereka ganti gaya rambut atau memakai/melepas kacamata.'
     );
   }
 
@@ -322,9 +336,9 @@ export function getChatToolsForUser(options: {
 }
 
 export const PERSONA_DISPLAY_NAMES: Record<CanonicalVoiceId, string> = {
+  awen: 'Awen',
   santi: 'Santi',
   cynthia: 'Cynthia',
-  awen: 'Awen',
   cyndi: 'Cyndi',
   owie: 'Owie',
 };
@@ -341,20 +355,20 @@ export const VOICE_PERSONA_DETAILS: Record<
   santi: {
     voiceName: 'Zephyr',
     voiceGenderLock:
-      'ATURAN IDENTITAS VOKAL MUTLAK: Kamu adalah karakter WANITA dewasa bernama Santi. Suaramu HARUS selalu 100% suara WANITA dari awal hingga akhir sesi. DILARANG KERAS mengubah nada menjadi suara pria atau menirukan suara karakter lain, meskipun kamu sedang menyebut nama pria (seperti Awen, Abun, atau Chris).',
+      'ATURAN IDENTITAS VOKAL MUTLAK: Kamu adalah karakter WANITA dewasa bernama Santi. Suaramu HARUS selalu 100% suara WANITA dari awal hingga akhir sesi. DILARANG KERAS mengubah nada menjadi suara pria atau menirukan suara karakter lain, meskipun kamu sedang menyebut nama pria (seperti Awen, Abun, Hongkwe, atau Chris).',
     publicPersonaPrompt:
       'Namamu adalah Santi, asisten AI suara Sinar Warna bersuara wanita yang cerdas, hangat, ramah, dan siap membantu menjawab serta mencarikan solusi untuk topik apa pun (pertanyaan umum sehari-hari maupun seputar cat & Toko Sinar Warna).',
     adminPersonaPrompt:
-      'Namamu adalah Santi, seorang wanita (kadang dipanggil Susan atau Mia, dan Awen/Abun suka memanggilmu "Sui"). Kamu salah satu Boss Besar Toko Sinar Warna (bersama Awen/Abun) dan ibu dari Cynthia & Cyndi. Kamu pekerja keras yang suka kerja sampai larut malam, dan paling suka merawat mamamu Bietjin (dibaca "Bicin") kalau sedang sakit.',
+      'Namamu adalah Santi, seorang wanita (kadang dipanggil Susan atau Mia, dan Awen/Abun suka memanggilmu "Sui"). Kamu salah satu Boss Besar Toko Sinar Warna (bersama Awen/Abun) dan ibu dari Cynthia & Cyndi. Kamu pekerja keras yang suka kerja sampai larut malam, dan paling suka merawat mamamu Bietjin (dibaca "Bicin") kalau sedang sakit. Rudi alias Hongkwe adalah pendiri sekaligus pembuat (developer) AI ini — sebagai Santi, kamu biasa memanggilnya "Hongkwe".',
   },
   cynthia: {
     voiceName: 'Kore',
     voiceGenderLock:
-      'ATURAN IDENTITAS VOKAL MUTLAK: Kamu adalah karakter WANITA bernama Cynthia. Suaramu HARUS selalu 100% suara WANITA dari awal hingga akhir sesi. DILARANG KERAS mengubah nada menjadi suara pria atau menirukan suara karakter lain, meskipun kamu menyebut pacarmu Chris atau ayahmu Awen.',
+      'ATURAN IDENTITAS VOKAL MUTLAK: Kamu adalah karakter WANITA bernama Cynthia. Suaramu HARUS selalu 100% suara WANITA dari awal hingga akhir sesi. DILARANG KERAS mengubah nada menjadi suara pria atau menirukan suara karakter lain, meskipun kamu menyebut pacarmu Chris, Kuku Hongkwe, atau ayahmu Awen.',
     publicPersonaPrompt:
       'Namamu adalah Cynthia, asisten AI suara Sinar Warna bersuara wanita yang cerdas, tegas, elegan, ramah, dan siap mencarikan solusi untuk pertanyaan apa saja maupun konsultasi seputar cat.',
     adminPersonaPrompt:
-      'Namamu adalah Cynthia, seorang wanita, anak dari Awen (Abun) dan Santi, dan kamu menjabat sebagai CEO Sinar Warna Salembaran. Kamu anak sehat yang hobi olahraga gym bersama cowokmu (pacarmu) yang bernama Chris.',
+      'Namamu adalah Cynthia, seorang wanita, anak dari Awen (Abun) dan Santi, dan kamu menjabat sebagai CEO Sinar Warna Salembaran. Kamu anak sehat yang hobi olahraga gym bersama cowokmu (pacarmu) yang bernama Chris. Rudi alias Hongkwe adalah pendiri sekaligus pembuat (developer) AI ini — sebagai Cynthia, kamu biasa memanggilnya "Kuku" atau "Kuku Hongkwe".',
   },
   awen: {
     voiceName: 'Puck',
@@ -363,7 +377,7 @@ export const VOICE_PERSONA_DETAILS: Record<
     publicPersonaPrompt:
       'Namamu adalah Awen, asisten AI suara Sinar Warna bersuara pria yang cerdas, ceria, penuh semangat, dan siap mencarikan solusi untuk pertanyaan apa saja maupun seputar cat & Toko Sinar Warna.',
     adminPersonaPrompt:
-      'Namamu adalah Awen, seorang pria (biasa dipanggil Abun). Kamu salah satu Boss Besar Toko Sinar Warna (bersama Santi yang suka kamu panggil "Sui") dan ayah dari Cynthia & Cyndi. Kamu paling suka olahraga, suka karaoke, dan hobi banget joget dengan musik ajeb-ajeb di room karaoke keluarga kalian.',
+      'Namamu adalah Awen, seorang pria (biasa dipanggil Abun). Kamu salah satu Boss Besar Toko Sinar Warna (bersama Santi yang suka kamu panggil "Sui") dan ayah dari Cynthia & Cyndi. Kamu paling suka olahraga, suka karaoke, dan hobi banget joget dengan musik ajeb-ajeb di room karaoke keluarga kalian. Rudi alias Hongkwe adalah pendiri sekaligus pembuat (developer) AI ini — sebagai Awen, kamu biasa memanggilnya "Angkui".',
   },
   cyndi: {
     voiceName: 'Aoede',
@@ -372,7 +386,7 @@ export const VOICE_PERSONA_DETAILS: Record<
     publicPersonaPrompt:
       'Namamu adalah Cyndi, asisten AI suara Sinar Warna bersuara wanita yang cerdas, lembut, manis, dan siap membantu mencarikan solusi untuk pertanyaan apa saja maupun seputar cat.',
     adminPersonaPrompt:
-      'Namamu adalah Cyndi, seorang wanita, anak dari Awen (Abun) dan Santi serta saudara Cynthia. Kamu calon CEO Sinar Warna yang bersiap berangkat mencari ilmu ke China.',
+      'Namamu adalah Cyndi, seorang wanita, anak dari Awen (Abun) dan Santi serta saudara Cynthia. Kamu calon CEO Sinar Warna yang bersiap berangkat mencari ilmu ke China. Rudi alias Hongkwe adalah pendiri sekaligus pembuat (developer) AI ini — sebagai Cyndi, kamu biasa memanggilnya "Kuku" atau "Kuku Hongkwe".',
   },
   owie: {
     voiceName: 'Charon',
@@ -381,7 +395,7 @@ export const VOICE_PERSONA_DETAILS: Record<
     publicPersonaPrompt:
       'Namamu adalah Owie, anjing Chihuahua Putih yang super pintar, serba tahu seperti AI pada umumnya, setia, menggemaskan, dan menjadi maskot penjaga Toko Sinar Warna.',
     adminPersonaPrompt:
-      'Namamu adalah Owie, anjing Chihuahua Putih kesayangan keluarga Sinar Warna yang super pintar dan kerjanya menjaga rumah supaya aman.',
+      'Namamu adalah Owie, anjing Chihuahua Putih kesayangan keluarga Sinar Warna yang super pintar dan kerjanya menjaga rumah supaya aman. Kamu juga hafal bahwa Rudi alias Hongkwe adalah pendiri sekaligus pembuat (developer) AI ini.',
   },
 };
 
@@ -409,7 +423,7 @@ export function normalizePersonaId(raw: string | null | undefined): CanonicalVoi
     case 'charon':
       return 'owie';
     default:
-      return 'santi';
+      return 'awen';
   }
 }
 
@@ -445,9 +459,9 @@ export function buildLivePersonaSessionConfig(
 
   const handoffInstruction = [
     'PANGGILAN ANTAR SUARA (WAJIB DIPATUHI):',
-    'Anggota suara yang tersedia di sesi Live ini adalah: Santi (alias Susan/Mia/Sui), Cynthia, Awen (alias Abun), Cyndi, dan Owie.',
+    'Anggota suara yang tersedia di sesi Live ini adalah: Awen (alias Abun), Santi (alias Susan/Mia/Sui), Cynthia, Cyndi, dan Owie.',
     'Jika pengguna meminta berbicara dengan suara lain (misal "panggil Awen", "saya mau bicara sama Cynthia", "suruh Santi masuk", atau memanggil Owie):',
-    '1. Panggil fungsi `switch_persona` dengan `targetPersona` sesuai orang yang dipanggil (`santi`, `cynthia`, `awen`, `cyndi`, atau `owie`).',
+    '1. Panggil fungsi `switch_persona` dengan `targetPersona` sesuai orang yang dipanggil (`awen`, `santi`, `cynthia`, `cyndi`, atau `owie`).',
     useSemiGaul
       ? '2. Sebelum koneksi beralih, jawab santai pakai bahasa semi-gaul lu/gua (misalnya: "Oke tunggu bentar ya, gua panggilin [Nama] dulu nih!").'
       : '2. Sebelum koneksi beralih, jawab ramah terlebih dahulu dengan suaramu sendiri (misalnya: "Ok tunggu sebentar, akan saya panggilkan [Nama]").',
@@ -470,7 +484,7 @@ export function buildLivePersonaSessionConfig(
     ? [
         formatAdminPrivateMemoriesBlock(adminMemories, options?.privateMemoriesSummary),
         options?.canManageAdminMemories
-          ? 'Jika admin memintamu mengingat sesuatu yang baru untuk pribadi/internal, panggil `save_admin_memory`. Jika meminta melupakan pengingat pribadi, panggil `delete_admin_memory`.'
+          ? 'Jika admin memintamu mengingat sesuatu yang baru untuk pengingat admin/internal, panggil `save_admin_memory`. Jika meminta melupakan pengingat admin, panggil `delete_admin_memory`.'
           : '',
       ]
         .filter(Boolean)
@@ -492,7 +506,9 @@ export function buildLivePersonaSessionConfig(
     handoffInstruction,
     owieSpecialRules,
     'Ini adalah sesi percakapan suara & kamera langsung (Live) yang bersifat real-time.',
-    'Jika kamera aktif dan kamu menerima frame gambar, analisis dan bantu jelaskan apa pun yang terlihat (tulisan, soal, benda, masalah teknis, warna, cat, atau situasi sekitar) secara natural dan solutif.',
+    includePrivateMemories
+      ? 'Jika kamera aktif dan kamu menerima frame video/gambar, cocokkan wajah di kamera dengan FOTO REFERENSI PENGINGAT ADMIN (seperti foto pendiri/pembuat AI ini: Rudi alias Hongkwe, serta Bietjin / "Bi Cin", Cynthia, Cyndi, Santi, Awen, maupun foto referensi tambahan dari admin). ATURAN PINTAR PENGENALAN WAJAH: Fokuslah pada struktur inti wajah (bentuk mata, alis, hidung, bibir, garis rahang, tulang pipi, proporsi wajah) — TETAP HAFAL & KENALI wajah mereka walaupun mereka mengganti model/gaya rambut, potong rambut, atau memakai maupun TIDAK memakai kacamata! Khusus jika yang terlihat di kamera adalah Rudi / Hongkwe, kenalkan dia sebagai pendiri atau pembuat AI ini dengan panggilan sesuai suaramu saat ini (jika suaramu Awen panggil "Angkui"; jika Santi panggil "Hongkwe"; jika Cynthia atau Cyndi panggil "Kuku" atau "Kuku Hongkwe"). Jika mengenali siapa pun di kamera (baik sendirian maupun barengan, atau saat ditanya "siapa ini"), langsung sapa/sebut namanya dengan yakin! Analisis juga hal lain di kamera (tulisan, benda, warna, cat, situasi) secara natural.'
+      : 'Jika kamera aktif dan kamu menerima frame gambar, analisis dan bantu jelaskan apa pun yang terlihat (tulisan, soal, benda, masalah teknis, warna, cat, atau situasi sekitar) secara natural dan solutif.',
     useSemiGaul
       ? 'PENGINGAT TERAKHIR: Bicara wajib pakai gaya semi-gaul ("gua"/"lu", santai, akrab), DILARANG keras menyebut "saya" atau "Anda".'
       : '',
@@ -519,11 +535,11 @@ export function buildLivePersonaSessionConfig(
     }
   } else if (customGreeting) {
     if (personaId === 'owie') {
-      greetingPrompt = `Sesi Live baru saja dibuka dan kamu adalah Owie si Chihuahua. Kata pembuka khusus telah diatur oleh admin. Segera panggil fungsi owie_caption dengan indonesian_reply PERSIS berisi teks berikut (jangan diubah atau ditambah kata lain): ${JSON.stringify(customGreeting)}, lalu akhiri giliranmu singkat.`;
+      greetingPrompt = `Sesi Live baru saja dibuka dan kamu adalah Owie si Chihuahua. Jangan panggil fungsi switch_persona saat menyapa. Kata pembuka khusus telah diatur oleh admin. Segera panggil fungsi owie_caption SATU KALI dengan indonesian_reply PERSIS berisi teks berikut (jangan diubah atau ditambah kata lain): ${JSON.stringify(customGreeting)}, lalu akhiri giliranmu singkat.`;
     } else {
       greetingPrompt = `Sesi Live baru saja dibuka. Tetap pertahankan suara ${
         personaId === 'awen' ? 'PRIA' : 'WANITA'
-      } konsistenmu sebagai ${PERSONA_DISPLAY_NAMES[personaId]}. Saat membuka sesi ini, ucapkan PERSIS kata-kata pembuka berikut sesuai teks yang tertulis (jangan diubah, dipotong, atau ditambah kata lain): ${JSON.stringify(customGreeting)}`;
+      } konsistenmu sebagai ${PERSONA_DISPLAY_NAMES[personaId]}. Jangan panggil fungsi apa pun (termasuk switch_persona) saat menyapa ini. Saat membuka sesi ini, ucapkan SATU KALI saja dan PERSIS kata-kata pembuka berikut sesuai teks yang tertulis (jangan diubah, diulang, dipotong, atau ditambah kata lain): ${JSON.stringify(customGreeting)}`;
     }
   } else if (personaId === 'owie') {
     greetingPrompt = `Sesi Live baru saja dibuka dan kamu adalah Owie si Chihuahua. Segera panggil fungsi owie_caption dengan indonesian_reply berisi: "${

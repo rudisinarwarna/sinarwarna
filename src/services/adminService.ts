@@ -46,6 +46,7 @@ export interface AdminMemoryDoc {
   id: string;
   title: string;
   content: string;
+  imageData?: string;
   createdBy: string;
   createdByEmail?: string;
   createdAt: number;
@@ -113,7 +114,8 @@ export function subscribeOwnUserAccess(
     }
 
     const isAdmin = adminLevel !== 'none';
-    const canAccessMemories = adminLevel === 'primary' || adminLevel === 'admin_plus';
+    const canAccessMemories =
+      adminLevel === 'primary' || adminLevel === 'admin_plus' || adminLevel === 'admin';
     onUpdate({
       isAdmin,
       adminLevel,
@@ -171,33 +173,95 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
   const seedRef = doc(db, 'adminMeta', 'seed');
   try {
     const seedSnap = await getDoc(seedRef);
-    if (seedSnap.exists() && seedSnap.data()?.seededDefaultMemories === true) {
+    const seedData = seedSnap.exists() ? seedSnap.data() : null;
+    const defaultSeeded = seedData?.seededDefaultMemories === true;
+    const photoSeeded = seedData?.seededPhotoMemories === true;
+    const founderPhotoSeeded = seedData?.seededFounderPhoto === true;
+    const founderAngkuiSeeded = seedData?.seededFounderAngkui === true;
+
+    if (defaultSeeded && photoSeeded && founderPhotoSeeded && founderAngkuiSeeded) {
       return;
     }
 
     const existingSnap = await getDocs(collection(db, 'adminMemories'));
-    const existingIds = new Set(existingSnap.docs.map((d) => d.id));
+    const existingById = new Map(existingSnap.docs.map((d) => [d.id, d]));
 
     const batch = writeBatch(db);
-    for (const mem of DEFAULT_ADMIN_PRIVATE_MEMORIES) {
-      if (!existingIds.has(mem.id)) {
-        batch.set(doc(db, 'adminMemories', mem.id), {
-          id: mem.id,
-          title: mem.title.slice(0, 120),
-          content: mem.content.slice(0, 2000),
-          createdBy: uid,
-          createdByEmail: (adminUser.email || '').slice(0, 200),
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+
+    if (!defaultSeeded) {
+      for (const mem of DEFAULT_ADMIN_PRIVATE_MEMORIES) {
+        if (!existingById.has(mem.id)) {
+          batch.set(doc(db, 'adminMemories', mem.id), {
+            id: mem.id,
+            title: mem.title.slice(0, 120),
+            content: mem.content.slice(0, 2000),
+            createdBy: uid,
+            createdByEmail: (adminUser.email || '').slice(0, 200),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
       }
     }
-    batch.set(seedRef, {
-      seededDefaultMemories: true,
-      updatedBy: uid,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+
+    if (!photoSeeded || !founderPhotoSeeded || !founderAngkuiSeeded) {
+      const { DEFAULT_ADMIN_PHOTO_MEMORIES } = await import('../../shared/adminPhotoMemories');
+      for (const photoMem of DEFAULT_ADMIN_PHOTO_MEMORIES) {
+        if (photoSeeded && photoMem.id !== 'mem_default_foto_rudi_hongkwe') {
+          continue;
+        }
+        const existingDoc = existingById.get(photoMem.id);
+        if (!existingDoc) {
+          batch.set(doc(db, 'adminMemories', photoMem.id), {
+            id: photoMem.id,
+            title: photoMem.title.slice(0, 120),
+            content: photoMem.content.slice(0, 2000),
+            imageData: photoMem.imageData.slice(0, 160000),
+            createdBy: uid,
+            createdByEmail: (adminUser.email || '').slice(0, 200),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } else if (
+          photoMem.id === 'mem_default_foto_rudi_hongkwe' &&
+          !founderAngkuiSeeded
+        ) {
+          const existingContent = String(existingDoc.data()?.content || '');
+          if (existingContent.includes('memanggilnya "Kui"') || !existingContent.includes('Angkui')) {
+            const nextContent = existingContent.includes('memanggilnya "Kui"')
+              ? existingContent.replace('memanggilnya "Kui"', 'memanggilnya "Angkui"')
+              : photoMem.content;
+            batch.update(existingDoc.ref, {
+              title: photoMem.title.slice(0, 120),
+              content: nextContent.slice(0, 2000),
+              updatedAt: serverTimestamp(),
+            });
+          }
+        }
+      }
+    }
+
+    if (seedSnap.exists()) {
+      batch.update(seedRef, {
+        seededDefaultMemories: true,
+        seededPhotoMemories: true,
+        seededFounderPhoto: true,
+        seededFounderAngkui: true,
+        updatedBy: uid,
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      batch.set(seedRef, {
+        seededDefaultMemories: true,
+        seededPhotoMemories: true,
+        seededFounderPhoto: true,
+        seededFounderAngkui: true,
+        updatedBy: uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
     await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'adminMeta/seed');
@@ -437,10 +501,14 @@ export function subscribeAdminMemories(
     (snapshot) => {
       const list: AdminMemoryDoc[] = snapshot.docs.map((d) => {
         const data = d.data();
+        const rawImage = typeof data.imageData === 'string' ? data.imageData : '';
+        const imageData =
+          rawImage.length > 0 && rawImage.length <= 160000 ? rawImage : undefined;
         return {
           id: String(data.id || d.id),
           title: String(data.title || 'Pengingat'),
           content: String(data.content || ''),
+          ...(imageData ? { imageData } : {}),
           createdBy: String(data.createdBy || ''),
           createdByEmail:
             typeof data.createdByEmail === 'string' ? data.createdByEmail : undefined,
@@ -465,12 +533,19 @@ export async function addAdminMemory(params: {
   adminUser: User;
   title: string;
   content: string;
+  imageData?: string;
 }): Promise<void> {
-  const cleanTitle = params.title.trim().slice(0, 120) || 'Pengingat Pribadi';
+  const cleanTitle = params.title.trim().slice(0, 120) || 'Pengingat Admin';
   const cleanContent = params.content.trim().slice(0, 2000);
   if (!cleanContent) {
     throw new Error('Isi pengingat tidak boleh kosong.');
   }
+  const cleanPhoto = (params.imageData || '')
+    .replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '')
+    .trim();
+  const validPhoto =
+    cleanPhoto.length > 0 && cleanPhoto.length <= 160000 ? cleanPhoto : undefined;
+
   const memId = sanitizeId(`mem_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
   const path = `adminMemories/${memId}`;
   try {
@@ -478,6 +553,7 @@ export async function addAdminMemory(params: {
       id: memId,
       title: cleanTitle,
       content: cleanContent,
+      ...(validPhoto ? { imageData: validPhoto } : {}),
       createdBy: sanitizeId(params.adminUser.uid),
       createdByEmail: (params.adminUser.email || '').slice(0, 200),
       createdAt: serverTimestamp(),

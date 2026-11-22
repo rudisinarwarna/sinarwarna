@@ -227,7 +227,7 @@ async function createApp() {
 
   wss.on('connection', async (clientWs: WebSocket, req: http.IncomingMessage) => {
     const urlObj = new URL(req.url || '/live', 'http://localhost');
-    const rawVoice = urlObj.searchParams.get('voice') || 'santi';
+    const rawVoice = urlObj.searchParams.get('voice') || 'awen';
     const mode = urlObj.searchParams.get('mode') || 'general';
     const token = urlObj.searchParams.get('token');
 

@@ -23,7 +23,7 @@ export async function onRequestGet(context: CfPagesContext): Promise<Response> {
   serverWs.accept();
 
   const urlObj = new URL(context.request.url);
-  const rawVoice = urlObj.searchParams.get('voice') || 'santi';
+  const rawVoice = urlObj.searchParams.get('voice') || 'awen';
   const mode = urlObj.searchParams.get('mode') || 'general';
   const token = urlObj.searchParams.get('token');
 
