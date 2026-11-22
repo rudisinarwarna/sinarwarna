@@ -99,12 +99,17 @@ export async function runChatStreamWithTools(params: {
           ? authContext.adminMemories.map(normalizeFounderNick)
           : [...DEFAULT_ADMIN_PRIVATE_MEMORIES];
       const existingIds = new Set(base.map((m) => m.id));
-      if (!authContext.seedFamilyInaMetaExists || !authContext.seedRudiNoteMetaExists) {
+      if (
+        !authContext.seedFamilyInaMetaExists ||
+        !authContext.seedRudiNoteMetaExists ||
+        !authContext.seedSelfCameraReactMetaExists
+      ) {
         for (const m of DEFAULT_ADMIN_PRIVATE_MEMORIES) {
           if (
             (m.id === 'mem_default_cynthia_cyndi' ||
               m.id === 'mem_default_ina_karyawan' ||
-              m.id === 'mem_default_rudi_tidak_serumah') &&
+              m.id === 'mem_default_rudi_tidak_serumah' ||
+              m.id === 'mem_default_reaksi_kamera_keluarga') &&
             !existingIds.has(m.id)
           ) {
             base.push(m);
@@ -115,9 +120,14 @@ export async function runChatStreamWithTools(params: {
       for (const p of DEFAULT_ADMIN_PHOTO_MEMORIES) {
         const shouldIncludeFounderFallback =
           p.id === 'mem_default_foto_rudi_hongkwe' && !authContext.seedFounderPhotoMetaExists;
+        const shouldIncludeChrisFallback =
+          p.id === 'mem_default_foto_chris' && !authContext.seedChrisPhotoMetaExists;
         const shouldIncludeGeneralFallback =
           !authContext.seedPhotoMetaExists || !authContext.adminMemoriesFetchOk;
-        if ((shouldIncludeFounderFallback || shouldIncludeGeneralFallback) && !existingIds.has(p.id)) {
+        if (
+          (shouldIncludeFounderFallback || shouldIncludeChrisFallback || shouldIncludeGeneralFallback) &&
+          !existingIds.has(p.id)
+        ) {
           base.push(p);
         }
       }
@@ -136,7 +146,7 @@ export async function runChatStreamWithTools(params: {
   const photoMemories = includePrivateMemories
     ? effectiveAdminMemories
         .filter((m): m is AdminMemoryItem & { imageData: string } => Boolean(m.imageData))
-        .slice(0, 6)
+        .slice(0, 8)
     : [];
 
   const photoPrimerTurns: Content[] = [];

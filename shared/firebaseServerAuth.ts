@@ -51,6 +51,8 @@ export interface ServerAuthContext {
   seedFounderAngkuiMetaExists: boolean;
   seedFamilyInaMetaExists: boolean;
   seedRudiNoteMetaExists: boolean;
+  seedChrisPhotoMetaExists: boolean;
+  seedSelfCameraReactMetaExists: boolean;
   idToken: string | null;
 }
 
@@ -337,6 +339,8 @@ export async function resolveServerAuthContext(
     seedFounderAngkuiMetaExists: false,
     seedFamilyInaMetaExists: false,
     seedRudiNoteMetaExists: false,
+    seedChrisPhotoMetaExists: false,
+    seedSelfCameraReactMetaExists: false,
     idToken: null,
   };
 
@@ -400,6 +404,8 @@ export async function resolveServerAuthContext(
   let seedFounderAngkuiMetaExists = false;
   let seedFamilyInaMetaExists = false;
   let seedRudiNoteMetaExists = false;
+  let seedChrisPhotoMetaExists = false;
+  let seedSelfCameraReactMetaExists = false;
 
   if (canAccessAdminMemories) {
     const base = firestoreDocsBaseUrl();
@@ -418,6 +424,8 @@ export async function resolveServerAuthContext(
       seedFounderAngkuiMetaExists = seedDoc?.fields?.seededFounderAngkui?.booleanValue === true;
       seedFamilyInaMetaExists = seedDoc?.fields?.seededFamilyIna?.booleanValue === true;
       seedRudiNoteMetaExists = seedDoc?.fields?.seededRudiNote?.booleanValue === true;
+      seedChrisPhotoMetaExists = seedDoc?.fields?.seededChrisPhoto?.booleanValue === true;
+      seedSelfCameraReactMetaExists = seedDoc?.fields?.seededSelfCameraReact?.booleanValue === true;
     }
   }
 
@@ -440,6 +448,8 @@ export async function resolveServerAuthContext(
     seedFounderAngkuiMetaExists,
     seedFamilyInaMetaExists,
     seedRudiNoteMetaExists,
+    seedChrisPhotoMetaExists,
+    seedSelfCameraReactMetaExists,
     idToken,
   };
 }

@@ -180,6 +180,8 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
     const founderAngkuiSeeded = seedData?.seededFounderAngkui === true;
     const familyInaSeeded = seedData?.seededFamilyIna === true;
     const rudiNoteSeeded = seedData?.seededRudiNote === true;
+    const chrisPhotoSeeded = seedData?.seededChrisPhoto === true;
+    const selfCameraReactSeeded = seedData?.seededSelfCameraReact === true;
 
     if (
       defaultSeeded &&
@@ -187,7 +189,9 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
       founderPhotoSeeded &&
       founderAngkuiSeeded &&
       familyInaSeeded &&
-      rudiNoteSeeded
+      rudiNoteSeeded &&
+      chrisPhotoSeeded &&
+      selfCameraReactSeeded
     ) {
       return;
     }
@@ -197,13 +201,14 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
 
     const batch = writeBatch(db);
 
-    if (!defaultSeeded || !familyInaSeeded || !rudiNoteSeeded) {
+    if (!defaultSeeded || !familyInaSeeded || !rudiNoteSeeded || !selfCameraReactSeeded) {
       for (const mem of DEFAULT_ADMIN_PRIVATE_MEMORIES) {
         if (
           defaultSeeded &&
           mem.id !== 'mem_default_cynthia_cyndi' &&
           mem.id !== 'mem_default_ina_karyawan' &&
-          mem.id !== 'mem_default_rudi_tidak_serumah'
+          mem.id !== 'mem_default_rudi_tidak_serumah' &&
+          mem.id !== 'mem_default_reaksi_kamera_keluarga'
         ) {
           continue;
         }
@@ -221,10 +226,14 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
       }
     }
 
-    if (!photoSeeded || !founderPhotoSeeded || !founderAngkuiSeeded) {
+    if (!photoSeeded || !founderPhotoSeeded || !founderAngkuiSeeded || !chrisPhotoSeeded) {
       const { DEFAULT_ADMIN_PHOTO_MEMORIES } = await import('../../shared/adminPhotoMemories');
       for (const photoMem of DEFAULT_ADMIN_PHOTO_MEMORIES) {
-        if (photoSeeded && photoMem.id !== 'mem_default_foto_rudi_hongkwe') {
+        if (
+          photoSeeded &&
+          photoMem.id !== 'mem_default_foto_rudi_hongkwe' &&
+          photoMem.id !== 'mem_default_foto_chris'
+        ) {
           continue;
         }
         const existingDoc = existingById.get(photoMem.id);
@@ -266,6 +275,8 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
         seededFounderAngkui: true,
         seededFamilyIna: true,
         seededRudiNote: true,
+        seededChrisPhoto: true,
+        seededSelfCameraReact: true,
         updatedBy: uid,
         updatedAt: serverTimestamp(),
       });
@@ -277,6 +288,8 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
         seededFounderAngkui: true,
         seededFamilyIna: true,
         seededRudiNote: true,
+        seededChrisPhoto: true,
+        seededSelfCameraReact: true,
         updatedBy: uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),

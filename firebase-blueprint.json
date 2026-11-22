@@ -173,6 +173,12 @@
         "seededRudiNote": {
           "type": "boolean"
         },
+        "seededChrisPhoto": {
+          "type": "boolean"
+        },
+        "seededSelfCameraReact": {
+          "type": "boolean"
+        },
         "updatedBy": {
           "type": "string",
           "minLength": 1,

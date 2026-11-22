@@ -196,6 +196,8 @@ service cloud.firestore {
         (!('seededFounderAngkui' in data) || data.seededFounderAngkui is bool) &&
         (!('seededFamilyIna' in data) || data.seededFamilyIna is bool) &&
         (!('seededRudiNote' in data) || data.seededRudiNote is bool) &&
+        (!('seededChrisPhoto' in data) || data.seededChrisPhoto is bool) &&
+        (!('seededSelfCameraReact' in data) || data.seededSelfCameraReact is bool) &&
         data.updatedBy is string &&
         data.updatedBy.size() >= 1 &&
         data.updatedBy.size() <= 128 &&
@@ -400,7 +402,7 @@ service cloud.firestore {
         isValidAdminSeedMeta(incoming()) &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['seededDefaultMemories', 'seededPhotoMemories', 'seededFounderPhoto', 'seededFounderAngkui', 'seededFamilyIna', 'seededRudiNote', 'updatedBy', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['seededDefaultMemories', 'seededPhotoMemories', 'seededFounderPhoto', 'seededFounderAngkui', 'seededFamilyIna', 'seededRudiNote', 'seededChrisPhoto', 'seededSelfCameraReact', 'updatedBy', 'updatedAt']);
       allow delete: if false;
     }
 
