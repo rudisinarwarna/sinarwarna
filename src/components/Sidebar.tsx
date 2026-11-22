@@ -1,5 +1,4 @@
 import React, { useMemo, useState } from 'react';
-import type { User } from 'firebase/auth';
 import {
   LogIn,
   LogOut,
@@ -15,10 +14,17 @@ import type { Conversation } from '../types/chat';
 import { SinarLogo } from './SinarLogo';
 import { VerifiedBlueBadge } from './VerifiedBlueBadge';
 
+export interface SidebarUserInfo {
+  uid?: string;
+  displayName: string | null;
+  email: string | null;
+  photoURL: string | null;
+}
+
 interface SidebarProps {
   isDesktopOpen: boolean;
   isMobileOpen: boolean;
-  user: User | null;
+  user: SidebarUserInfo | null;
   isCloudUser?: boolean;
   isAdmin?: boolean;
   isVerifiedBadge?: boolean;
@@ -218,7 +224,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </span>
         </button>
 
-        {authReady && user ? (
+        {user ? (
           <div className="flex items-center justify-between gap-2 rounded-xl px-2.5 py-2">
             <div className="flex min-w-0 items-center gap-2.5">
               {user.photoURL ? (
@@ -262,10 +268,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <LogOut className="h-4 w-4" />
             </button>
           </div>
+        ) : !authReady ? (
+          <div className="flex min-h-[44px] w-full items-center gap-2.5 rounded-xl border border-zinc-200/70 dark:border-[#242C44] bg-white/60 dark:bg-[#171E33]/60 px-3 text-xs text-zinc-500 dark:text-zinc-400">
+            <div className="h-6 w-6 shrink-0 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-700" />
+            <span className="truncate">Memeriksa akun...</span>
+          </div>
         ) : (
           <button
             type="button"
-            disabled={!authReady || authLoading}
+            disabled={authLoading}
             onClick={() => {
               onSignIn();
               onCloseMobile();

@@ -117,17 +117,28 @@ export async function upsertUserProfile(user: User): Promise<UpsertProfileResult
       return { role: 'user', verifiedBadge: false, blocked, deleted };
     }
 
-    const updates: Record<string, unknown> = {
-      displayName,
-      role,
-      verifiedBadge,
-      blocked: false,
-      deleted: false,
-      updatedAt: serverTimestamp(),
-    };
-    if (cleanEmail) updates.email = cleanEmail;
-    if (photoUrl) updates.photoUrl = photoUrl;
-    await updateDoc(userRef, updates);
+    const needsUpdate =
+      existing.displayName !== displayName ||
+      existing.role !== role ||
+      existing.verifiedBadge !== verifiedBadge ||
+      existing.blocked !== false ||
+      existing.deleted !== false ||
+      (cleanEmail && existing.email !== cleanEmail) ||
+      (photoUrl && existing.photoUrl !== photoUrl);
+
+    if (needsUpdate) {
+      const updates: Record<string, unknown> = {
+        displayName,
+        role,
+        verifiedBadge,
+        blocked: false,
+        deleted: false,
+        updatedAt: serverTimestamp(),
+      };
+      if (cleanEmail) updates.email = cleanEmail;
+      if (photoUrl) updates.photoUrl = photoUrl;
+      await updateDoc(userRef, updates);
+    }
 
     if (primaryAdmin) {
       await ensurePrimaryAdminGrant(user);

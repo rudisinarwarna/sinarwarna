@@ -45,6 +45,16 @@ import {
   type AdminLevel,
 } from './services/adminService';
 import {
+  clearCachedAuthSession,
+  readCachedActiveConversationId,
+  readCachedAuthSession,
+  readCachedConversations,
+  writeCachedActiveConversationId,
+  writeCachedAuthSession,
+  writeCachedConversations,
+  type CachedAuthSession,
+} from './services/authSessionCache';
+import {
   createConversationDoc,
   deleteConversationWithMessages,
   isPrimaryAdminUser,
@@ -105,9 +115,14 @@ export default function App() {
   const [sidebarDesktopOpen, setSidebarDesktopOpen] = useState<boolean>(true);
   const [sidebarMobileOpen, setSidebarMobileOpen] = useState<boolean>(false);
 
-  // Firebase Auth state
+  // Firebase Auth state (seeded synchronously from cached UI snapshot to eliminate refresh flicker/delay)
+  const [cachedAuth, setCachedAuth] = useState<CachedAuthSession | null>(() =>
+    readCachedAuthSession()
+  );
   const [user, setUser] = useState<User | null>(null);
-  const [isEmailVerified, setIsEmailVerified] = useState<boolean>(false);
+  const [isEmailVerified, setIsEmailVerified] = useState<boolean>(() =>
+    Boolean(cachedAuth?.isEmailVerified)
+  );
   const [authReady, setAuthReady] = useState<boolean>(false);
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
   const [bannerNotice, setBannerNotice] = useState<string | null>(null);
@@ -120,7 +135,9 @@ export default function App() {
   const [localConversations, setLocalConversations] = useState<Conversation[]>([]);
 
   // Cloud Firestore conversations & messages for active conversation
-  const [cloudConversations, setCloudConversations] = useState<Conversation[]>([]);
+  const [cloudConversations, setCloudConversations] = useState<Conversation[]>(() =>
+    cachedAuth?.isEmailVerified ? readCachedConversations(cachedAuth.uid) : []
+  );
   const [cloudMessagesByConv, setCloudMessagesByConv] = useState<Record<string, ChatMessage[]>>({});
   const [pendingMessagesByConv, setPendingMessagesByConv] = useState<Record<string, ChatMessage[]>>(
     {}
@@ -129,7 +146,9 @@ export default function App() {
     Record<string, ImageAttachment[]>
   >({});
 
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(() =>
+    cachedAuth?.isEmailVerified ? readCachedActiveConversationId(cachedAuth.uid) : null
+  );
 
   const [activeMode, setActiveMode] = useState<CreativeModeId>('general');
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -140,9 +159,13 @@ export default function App() {
   const [showLiveTranscript, setShowLiveTranscript] = useState<boolean>(loadInitialLiveTranscript);
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
   const [adminModalOpen, setAdminModalOpen] = useState<boolean>(false);
-  const [adminLevel, setAdminLevel] = useState<AdminLevel>('none');
+  const [adminLevel, setAdminLevel] = useState<AdminLevel>(() =>
+    cachedAuth?.isEmailVerified ? cachedAuth.adminLevel : 'none'
+  );
   const [freewillEnabled, setFreewillEnabled] = useState<boolean>(false);
-  const [isVerifiedBadge, setIsVerifiedBadge] = useState<boolean>(false);
+  const [isVerifiedBadge, setIsVerifiedBadge] = useState<boolean>(() =>
+    Boolean(cachedAuth?.isEmailVerified && cachedAuth.isVerifiedBadge)
+  );
   const [showInstallBanner, setShowInstallBanner] = useState<boolean>(
     () => !isInstallPromptDismissed()
   );
@@ -170,6 +193,20 @@ export default function App() {
   const isAdmin = effectiveAdminLevel !== 'none';
   const effectiveVerifiedBadge = isCloudUser && (isAdmin || isVerifiedBadge);
 
+  // Optimistic display-only state while Firebase Auth hydrates on refresh
+  const displayUser = user ?? cachedAuth;
+  const displayIsCloudUser = user
+    ? isCloudUser
+    : Boolean(!authReady && cachedAuth?.isEmailVerified);
+  const displayAdminLevel: AdminLevel = isCloudUser
+    ? effectiveAdminLevel
+    : displayIsCloudUser && cachedAuth
+    ? cachedAuth.adminLevel
+    : 'none';
+  const displayVerifiedBadge =
+    displayIsCloudUser &&
+    (displayAdminLevel !== 'none' || isVerifiedBadge || Boolean(!authReady && cachedAuth?.isVerifiedBadge));
+
   // Consume redirect result (for Google/Apple redirect flow outside iframes) & listen to Auth state
   useEffect(() => {
     void consumeAuthRedirectResult()
@@ -195,9 +232,17 @@ export default function App() {
         setAuthModalOpen(false);
         if (verified) {
           setLocalConversations([]);
+          const existingSnap = readCachedAuthSession();
+          const sameUid = existingSnap?.uid === firebaseUser.uid;
           const primary = isPrimaryAdminUser(firebaseUser);
-          setAdminLevel(primary ? 'primary' : 'none');
-          setIsVerifiedBadge(primary);
+          const initialLevel: AdminLevel = primary
+            ? 'primary'
+            : sameUid && existingSnap
+            ? existingSnap.adminLevel
+            : 'none';
+          const initialBadge = primary || (sameUid && Boolean(existingSnap?.isVerifiedBadge));
+          setAdminLevel(initialLevel);
+          setIsVerifiedBadge(initialBadge);
           void upsertUserProfile(firebaseUser)
             .then((res) => {
               if (res.blocked || res.deleted) {
@@ -205,6 +250,8 @@ export default function App() {
                 setIsVerifiedBadge(false);
                 setAdminModalOpen(false);
                 setLiveModalOpen(false);
+                clearCachedAuthSession(firebaseUser.uid);
+                setCachedAuth(null);
                 setBannerNotice(
                   res.deleted
                     ? 'Akun Anda telah dihapus oleh Administrator Sinar Warna.'
@@ -232,6 +279,8 @@ export default function App() {
           setAdminModalOpen(false);
         }
       } else {
+        clearCachedAuthSession();
+        setCachedAuth(null);
         setAdminLevel('none');
         setIsVerifiedBadge(false);
         setAdminModalOpen(false);
@@ -323,6 +372,37 @@ export default function App() {
     return () => unsubscribe();
   }, [authReady, isCloudUser, user, activeConversationId, cloudConversations]);
 
+  // Keep lightweight auth & sidebar summary cache synchronized for instant reload
+  useEffect(() => {
+    if (!authReady) return;
+    if (!user) {
+      clearCachedAuthSession();
+      setCachedAuth(null);
+      return;
+    }
+    const nextSnapshot: CachedAuthSession = {
+      uid: user.uid,
+      displayName: user.displayName,
+      email: user.email,
+      photoURL: user.photoURL,
+      isEmailVerified,
+      adminLevel: effectiveAdminLevel,
+      isVerifiedBadge: effectiveVerifiedBadge,
+    };
+    writeCachedAuthSession(nextSnapshot);
+    setCachedAuth(nextSnapshot);
+  }, [authReady, user, isEmailVerified, effectiveAdminLevel, effectiveVerifiedBadge]);
+
+  useEffect(() => {
+    if (!authReady || !isCloudUser || !user) return;
+    writeCachedConversations(user.uid, cloudConversations);
+  }, [authReady, isCloudUser, user, cloudConversations]);
+
+  useEffect(() => {
+    if (!authReady || !isCloudUser || !user) return;
+    writeCachedActiveConversationId(user.uid, activeConversationId);
+  }, [authReady, isCloudUser, user, activeConversationId]);
+
   // Subscribe to global FREEWILL mode (non-PII doc in appConfig/freewill)
   useEffect(() => {
     const unsubscribe = subscribeFreewillConfig((enabled) => {
@@ -360,7 +440,7 @@ export default function App() {
     clearLegacyGuestStorage();
   }, []);
 
-  const conversations = isCloudUser ? cloudConversations : localConversations;
+  const conversations = displayIsCloudUser ? cloudConversations : localConversations;
 
   const activeConversation = useMemo(
     () => conversations.find((c) => c.id === activeConversationId) || null,
@@ -468,11 +548,15 @@ export default function App() {
     setLiveModalOpen(false);
     setCameraModalOpen(false);
     setSidebarMobileOpen(false);
+    clearCachedAuthSession(user?.uid || cachedAuth?.uid);
+    setCachedAuth(null);
+    setCloudConversations([]);
     setLocalConversations([]);
     setInMemoryAttachments({});
     setActiveConversationId(null);
+    await auth.authStateReady().catch(() => undefined);
     await signOutUser();
-  }, []);
+  }, [cachedAuth?.uid, user?.uid]);
 
   const stopStreaming = useCallback(() => {
     if (abortControllerRef.current) {
@@ -786,7 +870,12 @@ export default function App() {
         ? text.slice(0, 42) + (text.length > 42 ? '...' : '')
         : 'Analisis Gambar Kreatif';
 
-      const cloudUser = isCloudUser ? user : null;
+      let cloudUser = isCloudUser ? user : null;
+      if (!authReady && cachedAuth) {
+        await auth.authStateReady().catch(() => undefined);
+        const resolved = auth.currentUser;
+        cloudUser = resolved && isUserVerifiedAccount(resolved) ? resolved : null;
+      }
 
       if (!targetConvId) {
         targetConvId = createId();
@@ -1061,13 +1150,13 @@ export default function App() {
       <Sidebar
         isDesktopOpen={sidebarDesktopOpen}
         isMobileOpen={sidebarMobileOpen}
-        user={user}
-        isCloudUser={isCloudUser}
-        isAdmin={isAdmin}
-        isVerifiedBadge={effectiveVerifiedBadge}
+        user={displayUser}
+        isCloudUser={displayIsCloudUser}
+        isAdmin={displayAdminLevel !== 'none'}
+        isVerifiedBadge={displayVerifiedBadge}
         authReady={authReady}
         authLoading={false}
-        conversations={isCloudUser ? conversations : []}
+        conversations={displayIsCloudUser ? conversations : []}
         activeConversationId={activeConversationId}
         onCloseMobile={() => setSidebarMobileOpen(false)}
         onToggleDesktop={() => setSidebarDesktopOpen(false)}
@@ -1122,25 +1211,25 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {isCloudUser && (isAdmin || effectiveVerifiedBadge) && user && (
+            {displayIsCloudUser && (displayAdminLevel !== 'none' || displayVerifiedBadge) && displayUser && (
               <span
                 title={
-                  effectiveAdminLevel === 'primary'
+                  displayAdminLevel === 'primary'
                     ? 'Admin Utama Terverifikasi'
-                    : effectiveAdminLevel === 'admin_plus'
+                    : displayAdminLevel === 'admin_plus'
                     ? 'Admin+ Terverifikasi'
-                    : effectiveAdminLevel === 'admin'
+                    : displayAdminLevel === 'admin'
                     ? 'Admin Terverifikasi'
                     : 'Akun Terverifikasi'
                 }
                 className="inline-flex h-9 items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-50/70 dark:bg-sky-950/30 px-2.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 whitespace-nowrap shrink-0"
               >
                 <span className="max-w-[110px] truncate hidden sm:inline">
-                  {user.displayName || 'Terverifikasi'}
+                  {displayUser.displayName || 'Terverifikasi'}
                 </span>
                 <VerifiedBlueBadge
                   size="xs"
-                  title={isAdmin ? 'Admin Terverifikasi' : 'Akun Terverifikasi'}
+                  title={displayAdminLevel !== 'none' ? 'Admin Terverifikasi' : 'Akun Terverifikasi'}
                 />
               </span>
             )}

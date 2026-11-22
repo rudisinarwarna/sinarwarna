@@ -3,14 +3,16 @@ import { getAnalytics, isSupported, type Analytics } from 'firebase/analytics';
 import { initializeAppCheck, ReCaptchaV3Provider, type AppCheck } from 'firebase/app-check';
 import {
   browserLocalPersistence,
+  browserPopupRedirectResolver,
   createUserWithEmailAndPassword,
   getAuth,
   getRedirectResult,
   GoogleAuthProvider,
+  indexedDBLocalPersistence,
+  initializeAuth,
   OAuthProvider,
   sendEmailVerification,
   sendPasswordResetEmail,
-  setPersistence,
   signInWithEmailAndPassword,
   signInWithPopup,
   signInWithRedirect,
@@ -18,11 +20,19 @@ import {
   updateProfile,
   type AuthProvider,
 } from 'firebase/auth';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
+import {
+  doc,
+  getDocFromServer,
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const RECAPTCHA_SITE_KEY =
   firebaseConfig.recaptchaSiteKey || '6LcMqikuAAAAAJJd9jmIeHFeD54SdaqfapH5ilyz';
+const PENDING_REDIRECT_KEY = 'sw-auth-redirect-pending';
 
 const app = initializeApp({
   ...firebaseConfig,
@@ -47,14 +57,35 @@ if (typeof window !== 'undefined' && RECAPTCHA_SITE_KEY) {
   }
 }
 
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const auth = getAuth(app);
+export const db = (() => {
+  try {
+    return initializeFirestore(
+      app,
+      {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      },
+      firebaseConfig.firestoreDatabaseId
+    );
+  } catch {
+    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  }
+})();
+
+export const auth = (() => {
+  if (typeof window === 'undefined') return getAuth(app);
+  try {
+    return initializeAuth(app, {
+      persistence: [browserLocalPersistence, indexedDBLocalPersistence],
+      popupRedirectResolver: browserPopupRedirectResolver,
+    });
+  } catch {
+    return getAuth(app);
+  }
+})();
 auth.languageCode = 'id';
-if (typeof window !== 'undefined') {
-  void setPersistence(auth, browserLocalPersistence).catch(() => {
-    // Ignore persistence fallback issues in restricted storage modes
-  });
-}
+
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 export const appleProvider = new OAuthProvider('apple.com');
@@ -155,6 +186,11 @@ async function signInWithProviderSmart(provider: AuthProvider) {
       (code === 'auth/popup-blocked' ||
         code === 'auth/operation-not-supported-in-this-environment')
     ) {
+      try {
+        sessionStorage.setItem(PENDING_REDIRECT_KEY, '1');
+      } catch {
+        // Ignore sessionStorage error
+      }
       await signInWithRedirect(auth, provider);
       return null;
     }
@@ -163,6 +199,15 @@ async function signInWithProviderSmart(provider: AuthProvider) {
 }
 
 export async function consumeAuthRedirectResult() {
+  try {
+    if (typeof window !== 'undefined') {
+      const pending = sessionStorage.getItem(PENDING_REDIRECT_KEY);
+      if (pending !== '1') return null;
+      sessionStorage.removeItem(PENDING_REDIRECT_KEY);
+    }
+  } catch {
+    // Proceed to check redirect result if sessionStorage is unavailable
+  }
   return getRedirectResult(auth);
 }
 
