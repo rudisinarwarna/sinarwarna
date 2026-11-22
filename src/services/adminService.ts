@@ -182,6 +182,7 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
     const rudiNoteSeeded = seedData?.seededRudiNote === true;
     const chrisPhotoSeeded = seedData?.seededChrisPhoto === true;
     const selfCameraReactSeeded = seedData?.seededSelfCameraReact === true;
+    const owiePhotoSeeded = seedData?.seededOwiePhoto === true;
 
     if (
       defaultSeeded &&
@@ -191,7 +192,8 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
       familyInaSeeded &&
       rudiNoteSeeded &&
       chrisPhotoSeeded &&
-      selfCameraReactSeeded
+      selfCameraReactSeeded &&
+      owiePhotoSeeded
     ) {
       return;
     }
@@ -226,13 +228,20 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
       }
     }
 
-    if (!photoSeeded || !founderPhotoSeeded || !founderAngkuiSeeded || !chrisPhotoSeeded) {
+    if (
+      !photoSeeded ||
+      !founderPhotoSeeded ||
+      !founderAngkuiSeeded ||
+      !chrisPhotoSeeded ||
+      !owiePhotoSeeded
+    ) {
       const { DEFAULT_ADMIN_PHOTO_MEMORIES } = await import('../../shared/adminPhotoMemories');
       for (const photoMem of DEFAULT_ADMIN_PHOTO_MEMORIES) {
         if (
           photoSeeded &&
           photoMem.id !== 'mem_default_foto_rudi_hongkwe' &&
-          photoMem.id !== 'mem_default_foto_chris'
+          photoMem.id !== 'mem_default_foto_chris' &&
+          photoMem.id !== 'mem_default_foto_owie'
         ) {
           continue;
         }
@@ -277,6 +286,7 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
         seededRudiNote: true,
         seededChrisPhoto: true,
         seededSelfCameraReact: true,
+        seededOwiePhoto: true,
         updatedBy: uid,
         updatedAt: serverTimestamp(),
       });
@@ -290,6 +300,7 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
         seededRudiNote: true,
         seededChrisPhoto: true,
         seededSelfCameraReact: true,
+        seededOwiePhoto: true,
         updatedBy: uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),

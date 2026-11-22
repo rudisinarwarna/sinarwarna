@@ -110,10 +110,15 @@ export function createLiveBridge(params: {
           p.id === 'mem_default_foto_rudi_hongkwe' && !authContext.seedFounderPhotoMetaExists;
         const shouldIncludeChrisFallback =
           p.id === 'mem_default_foto_chris' && !authContext.seedChrisPhotoMetaExists;
+        const shouldIncludeOwieFallback =
+          p.id === 'mem_default_foto_owie' && !authContext.seedOwiePhotoMetaExists;
         const shouldIncludeGeneralFallback =
           !authContext.seedPhotoMetaExists || !authContext.adminMemoriesFetchOk;
         if (
-          (shouldIncludeFounderFallback || shouldIncludeChrisFallback || shouldIncludeGeneralFallback) &&
+          (shouldIncludeFounderFallback ||
+            shouldIncludeChrisFallback ||
+            shouldIncludeOwieFallback ||
+            shouldIncludeGeneralFallback) &&
           !existingIds.has(p.id)
         ) {
           base.push(p);

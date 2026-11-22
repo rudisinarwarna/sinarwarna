@@ -53,6 +53,7 @@ export interface ServerAuthContext {
   seedRudiNoteMetaExists: boolean;
   seedChrisPhotoMetaExists: boolean;
   seedSelfCameraReactMetaExists: boolean;
+  seedOwiePhotoMetaExists: boolean;
   idToken: string | null;
 }
 
@@ -341,6 +342,7 @@ export async function resolveServerAuthContext(
     seedRudiNoteMetaExists: false,
     seedChrisPhotoMetaExists: false,
     seedSelfCameraReactMetaExists: false,
+    seedOwiePhotoMetaExists: false,
     idToken: null,
   };
 
@@ -406,6 +408,7 @@ export async function resolveServerAuthContext(
   let seedRudiNoteMetaExists = false;
   let seedChrisPhotoMetaExists = false;
   let seedSelfCameraReactMetaExists = false;
+  let seedOwiePhotoMetaExists = false;
 
   if (canAccessAdminMemories) {
     const base = firestoreDocsBaseUrl();
@@ -426,6 +429,7 @@ export async function resolveServerAuthContext(
       seedRudiNoteMetaExists = seedDoc?.fields?.seededRudiNote?.booleanValue === true;
       seedChrisPhotoMetaExists = seedDoc?.fields?.seededChrisPhoto?.booleanValue === true;
       seedSelfCameraReactMetaExists = seedDoc?.fields?.seededSelfCameraReact?.booleanValue === true;
+      seedOwiePhotoMetaExists = seedDoc?.fields?.seededOwiePhoto?.booleanValue === true;
     }
   }
 
@@ -450,6 +454,7 @@ export async function resolveServerAuthContext(
     seedRudiNoteMetaExists,
     seedChrisPhotoMetaExists,
     seedSelfCameraReactMetaExists,
+    seedOwiePhotoMetaExists,
     idToken,
   };
 }

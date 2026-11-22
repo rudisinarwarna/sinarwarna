@@ -179,6 +179,9 @@
         "seededSelfCameraReact": {
           "type": "boolean"
         },
+        "seededOwiePhoto": {
+          "type": "boolean"
+        },
         "updatedBy": {
           "type": "string",
           "minLength": 1,
