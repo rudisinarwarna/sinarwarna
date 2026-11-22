@@ -17,13 +17,21 @@ export function buildApiUrl(path: string): string {
   return origin ? `${origin}${normalizedPath}` : normalizedPath;
 }
 
-export function buildLiveWsUrl(voice: string, mode: string, idToken?: string | null): string {
+export function buildLiveWsUrl(
+  voice: string,
+  mode: string,
+  idToken?: string | null,
+  initialCamera = false
+): string {
   const params = new URLSearchParams({
     voice,
     mode,
   });
   if (idToken) {
     params.set('token', idToken);
+  }
+  if (initialCamera) {
+    params.set('camera', '1');
   }
   const query = params.toString();
   const origin = getBackendHttpOrigin();

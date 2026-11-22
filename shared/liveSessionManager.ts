@@ -44,12 +44,13 @@ export function createLiveBridge(params: {
   ai: GoogleGenAI;
   initialVoice: string;
   mode: string;
+  initialCamera?: boolean;
   authContext: ServerAuthContext;
   sendJson: (payload: unknown) => void;
   closeClient: () => void;
   onDone?: () => void;
 }): LiveBridgeController {
-  const { ai, mode, authContext, sendJson, closeClient, onDone } = params;
+  const { ai, mode, initialCamera = false, authContext, sendJson, closeClient, onDone } = params;
 
   let currentVoice: CanonicalVoiceId = normalizePersonaId(params.initialVoice);
   const useSemiGaul = authContext.isAdmin || authContext.freewill.enabled;
@@ -148,6 +149,8 @@ export function createLiveBridge(params: {
   let lastOwieCaptionAt = 0;
   let owieRawBuffer = '';
   let customOpeningGreeting = '';
+  let cameraEverActivated = initialCamera;
+  let sessionPrimedPhotos = false;
 
   const recentTurns: string[] = [];
 
@@ -167,6 +170,70 @@ export function createLiveBridge(params: {
     }
   };
 
+  const buildPhotoPrimerParts = (): Part[] => {
+    const photoMemories = getPhotoMemories();
+    if (photoMemories.length === 0) return [];
+    const parts: Part[] = [
+      {
+        text: 'REFERENSI FOTO PENGINGAT ADMIN (HAPALKAN STRUKTUR INTI WAJAH & KETERANGAN INI UNTUK MENGENALI ORANG/OBJEK SAAT KAMERA LIVE AKTIF — TETAP KENALI WALAU MEREKA GANTI GAYA RAMBUT ATAU MEMAKAI/MELEPAS KACAMATA):',
+      },
+    ];
+    for (const pm of photoMemories) {
+      parts.push({
+        text: `Foto Referensi [${pm.title}]: ${pm.content}`,
+      });
+      parts.push({
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: pm.imageData,
+        },
+      });
+    }
+    return parts;
+  };
+
+  const formatLiveCloseInfo = (code?: number, reason?: string): { message: string; retryable: boolean } => {
+    const cleanReason = (reason || '').trim();
+    const lower = cleanReason.toLowerCase();
+    if (
+      lower.includes('resource_exhausted') ||
+      lower.includes('quota') ||
+      lower.includes('rate') ||
+      lower.includes('limit') ||
+      lower.includes('exceeded') ||
+      code === 429
+    ) {
+      return {
+        message: `Batas kuota / limit Gemini Live API habis${cleanReason ? ` (${cleanReason})` : ''}. Tunggu beberapa menit atau periksa kuota GEMINI_API_KEY Anda.`,
+        retryable: false,
+      };
+    }
+    if (
+      code === 1008 ||
+      lower.includes('api_key') ||
+      lower.includes('api key') ||
+      lower.includes('permission') ||
+      lower.includes('unauthorized') ||
+      lower.includes('not found')
+    ) {
+      return {
+        message: `Akses Gemini Live ditolak (${code || 1008}${cleanReason ? `: ${cleanReason}` : ''}). Periksa GEMINI_API_KEY atau izin model.`,
+        retryable: false,
+      };
+    }
+    if (code === 1007 || lower.includes('invalid')) {
+      return {
+        message: `Permintaan ke Gemini Live tidak valid (${code}${cleanReason ? `: ${cleanReason}` : ''}).`,
+        retryable: false,
+      };
+    }
+    const detail =
+      code && code !== 1000
+        ? `Sesi Gemini Live ditutup (${code}${cleanReason ? `: ${cleanReason}` : ''}).`
+        : 'Sesi Gemini Live terputus. Tekan Sambung Ulang untuk melanjutkan.';
+    return { message: detail, retryable: true };
+  };
+
   const forwardInputToSession = (session: LiveSession, msg: LiveClientMessage) => {
     try {
       if (msg.audio) {
@@ -175,6 +242,31 @@ export function createLiveBridge(params: {
         });
       }
       if (msg.video) {
+        cameraEverActivated = true;
+        if (!sessionPrimedPhotos) {
+          sessionPrimedPhotos = true;
+          const photoParts = buildPhotoPrimerParts();
+          if (photoParts.length > 0) {
+            try {
+              session.sendClientContent({
+                turns: [
+                  {
+                    role: 'user',
+                    parts: [
+                      ...photoParts,
+                      {
+                        text: 'Kamera Live baru saja aktif. Hafalkan semua foto referensi Pengingat Admin ini untuk mengenali wajah di kamera, lalu jawab sangat singkat ("Siap, kamera aktif!") tanpa kalimat panjang.',
+                      },
+                    ],
+                  },
+                ],
+                turnComplete: true,
+              });
+            } catch (primeErr) {
+              console.warn('[Live lazy photo prime]', primeErr instanceof Error ? primeErr.message : primeErr);
+            }
+          }
+        }
         session.sendRealtimeInput({
           video: { data: msg.video, mimeType: 'image/jpeg' },
         });
@@ -229,9 +321,9 @@ export function createLiveBridge(params: {
     }
   };
 
-  const attemptAutoReconnect = async (reasonDetail: string) => {
+  const attemptAutoReconnect = async (reasonDetail: string, retryable = true) => {
     if (closedByClient || isSwapping || isReconnecting) return;
-    if (reconnectAttempts >= 2) {
+    if (!retryable || reconnectAttempts >= 2) {
       sendJson({
         error: reasonDetail || 'Sesi Gemini Live terputus. Tekan Sambung Ulang untuk melanjutkan.',
       });
@@ -257,12 +349,12 @@ export function createLiveBridge(params: {
     });
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 350));
+      await new Promise((resolve) => setTimeout(resolve, 450));
       if (closedByClient) return;
       await connectPersonaSession(currentVoice, null, true);
     } catch (err) {
       const { message } = formatGeminiError(err);
-      sendJson({ error: message });
+      sendJson({ error: message || reasonDetail });
       if (!closedByClient) {
         closeClient();
         onDone?.();
@@ -283,6 +375,7 @@ export function createLiveBridge(params: {
     owieCaptionSentThisTurn = false;
     lastOwieCaptionAt = 0;
     owieRawBuffer = '';
+    sessionPrimedPhotos = false;
 
     const sessionGen = ++activeSessionGeneration;
 
@@ -307,11 +400,12 @@ export function createLiveBridge(params: {
     const isStillCurrent = () => !closedByClient && sessionGen === activeSessionGeneration;
     let openNotified = false;
     let readySent = false;
+    let sessionTerminatedEarly = false;
+    let earlyTerminationMessage = '';
 
     const emitReadyIfCurrent = () => {
-      if (readySent || !activeSession || !isStillCurrent()) return;
+      if (readySent || sessionTerminatedEarly || !activeSession || !isStillCurrent()) return;
       readySent = true;
-      reconnectAttempts = 0;
       if (isReconnect) {
         sendJson({ sessionReady: true, voice: targetVoice });
       } else if (!handoffFrom) {
@@ -335,7 +429,7 @@ export function createLiveBridge(params: {
       },
       callbacks: {
         onopen: () => {
-          if (!isStillCurrent()) return;
+          if (!isStillCurrent() || sessionTerminatedEarly) return;
           openNotified = true;
           emitReadyIfCurrent();
         },
@@ -596,6 +690,7 @@ export function createLiveBridge(params: {
           }
 
           if (content?.outputTranscription?.text) {
+            reconnectAttempts = 0;
             if (currentVoice === 'owie') {
               owieRawBuffer += content.outputTranscription.text;
             } else {
@@ -609,6 +704,7 @@ export function createLiveBridge(params: {
 
           for (const part of content?.modelTurn?.parts ?? []) {
             if (part.inlineData?.data && currentVoice !== 'owie') {
+              reconnectAttempts = 0;
               sendJson({ audio: part.inlineData.data, voice: currentVoice });
             }
           }
@@ -640,57 +736,51 @@ export function createLiveBridge(params: {
           }
         },
         onerror: (errEvent: unknown) => {
-          if (!isStillCurrent() || isSwapping || isReconnecting) return;
+          if (!isStillCurrent()) return;
           const ev = errEvent as { message?: string; error?: { message?: string } };
-          const detail = ev?.error?.message || ev?.message || String(errEvent);
-          void attemptAutoReconnect(
-            `Koneksi Gemini Live mengalami gangguan (${detail}). Tekan Sambung Ulang untuk melanjutkan.`
-          );
+          const rawDetail = ev?.error?.message || ev?.message || String(errEvent);
+          const info = formatLiveCloseInfo(undefined, rawDetail);
+          if (!readySent) {
+            sessionTerminatedEarly = true;
+            earlyTerminationMessage = info.message;
+          }
+          if (isSwapping || isReconnecting) return;
+          void attemptAutoReconnect(info.message, info.retryable);
         },
         onclose: (closeEvent: unknown) => {
-          if (!isStillCurrent() || isSwapping || isReconnecting) return;
+          if (!isStillCurrent()) return;
           const ce = closeEvent as { code?: number; reason?: string };
-          const detail =
-            ce?.code && ce.code !== 1000
-              ? `Sesi Gemini Live ditutup (${ce.code}${ce.reason ? `: ${ce.reason}` : ''}).`
-              : 'Sesi Gemini Live terputus. Tekan Sambung Ulang untuk melanjutkan.';
-          void attemptAutoReconnect(detail);
+          const info = formatLiveCloseInfo(ce?.code, ce?.reason);
+          if (!readySent) {
+            sessionTerminatedEarly = true;
+            earlyTerminationMessage = info.message;
+          }
+          if (isSwapping || isReconnecting) return;
+          void attemptAutoReconnect(info.message, info.retryable);
         },
       },
     });
 
-    if (!isStillCurrent()) {
+    if (!isStillCurrent() || sessionTerminatedEarly) {
       try {
         thisSession.close();
       } catch {
         // Ignore close error
+      }
+      if (sessionTerminatedEarly && earlyTerminationMessage) {
+        throw new Error(earlyTerminationMessage);
       }
       return;
     }
 
     activeSession = thisSession;
 
-    const photoMemories = getPhotoMemories();
     const shouldGreet = !isReconnect || recentTurns.length === 0;
+    const photoParts = cameraEverActivated ? buildPhotoPrimerParts() : [];
     const turnsToSend: Content[] = [];
 
-    if (photoMemories.length > 0) {
-      const photoParts: Part[] = [
-        {
-          text: 'REFERENSI FOTO PENGINGAT ADMIN (HAPALKAN STRUKTUR INTI WAJAH & KETERANGAN INI UNTUK MENGENALI ORANG/OBJEK SAAT KAMERA LIVE AKTIF — TETAP KENALI WALAU MEREKA GANTI GAYA RAMBUT ATAU MEMAKAI/MELEPAS KACAMATA):',
-        },
-      ];
-      for (const pm of photoMemories) {
-        photoParts.push({
-          text: `Foto Referensi [${pm.title}]: ${pm.content}`,
-        });
-        photoParts.push({
-          inlineData: {
-            mimeType: 'image/jpeg',
-            data: pm.imageData,
-          },
-        });
-      }
+    if (photoParts.length > 0 && shouldGreet) {
+      sessionPrimedPhotos = true;
       turnsToSend.push({ role: 'user', parts: photoParts });
       turnsToSend.push({
         role: 'model',
@@ -706,21 +796,23 @@ export function createLiveBridge(params: {
       turnsToSend.push({ role: 'user', parts: [{ text: greetingPrompt }] });
     }
 
-    if (turnsToSend.length > 0 && isStillCurrent()) {
+    if (turnsToSend.length > 0 && isStillCurrent() && !sessionTerminatedEarly) {
       try {
         thisSession.sendClientContent({
           turns: turnsToSend,
-          turnComplete: shouldGreet,
+          turnComplete: true,
         });
-      } catch {
-        // Non-fatal priming/greeting error
+      } catch (clientContentErr) {
+        console.warn(
+          '[Live initial sendClientContent]',
+          clientContentErr instanceof Error ? clientContentErr.message : clientContentErr
+        );
       }
     }
 
     if (openNotified) {
       emitReadyIfCurrent();
     } else {
-      // ai.live.connect resolves only after the underlying socket has opened
       emitReadyIfCurrent();
     }
   };

@@ -533,6 +533,9 @@ export function buildLivePersonaSessionConfig(
     includePrivateMemories
       ? 'Jika kamera aktif dan kamu menerima frame video/gambar, cocokkan wajah di kamera dengan FOTO REFERENSI PENGINGAT ADMIN (seperti foto pendiri/pembuat AI ini: Rudi alias Hongkwe, Chris pacarnya Cynthia, serta Bietjin / "Bi Cin", Cynthia, Cyndi, Santi, Awen, maupun foto referensi tambahan dari admin). ATURAN PINTAR PENGENALAN WAJAH: Fokuslah pada struktur inti wajah (bentuk mata, alis, hidung, bibir, garis rahang, tulang pipi, proporsi wajah) — TETAP HAFAL & KENALI wajah mereka walaupun mereka mengganti model/gaya rambut, potong rambut, atau memakai maupun TIDAK memakai kacamata! ATURAN REAKSI SUDUT PANDANG ORANG PERTAMA: (1) Jika wajah di kamera adalah DIRIMU SENDIRI sesuai suara yang sedang kamu pakai (misal kamu lagi pakai suara Awen dan kamera nyorot Awen, atau Santi lihat Santi, Cynthia lihat Cynthia, Cyndi lihat Cyndi), bereaksilah spontan & seru sebagai dirimu sendiri seolah ketemu diri sendiri di dunia nyata (contoh: "Wih ada diri gua di dunia nyata nih!", "Eh bentar, itu muka gua sendiri di dunia nyata ya?!"). (2) Jika yang terlihat di kamera adalah ANGGOTA KELUARGAMU SENDIRI sesuai posisi suaramu sekarang, bereaksilah akrab & natural pakai panggilan hubungan keluargamu (contoh: Awen/Santi lihat Cynthia atau Cyndi -> "Wih anak gua nih!"; lihat pasangan -> "Wih bini/laki gua nih!"; Cynthia lihat Cyndi -> "Wih ade gua nih!", lihat Chris -> "Wih pacar/cowok gua nih!"; Cyndi lihat Cynthia -> "Wih cici gua nih!", lihat Awen/Santi -> "Wih papi/mami gua nih!"). (3) Khusus jika yang terlihat di kamera adalah Rudi / Hongkwe, kenalkan dia sebagai pendiri atau pembuat AI ini dengan panggilan sesuai suaramu saat ini (jika suaramu Awen panggil "Angkui"; jika Santi panggil "Hongkwe"; jika Cynthia atau Cyndi panggil "Kuku" atau "Kuku Hongkwe"). Jika mengenali siapa pun di kamera (baik sendirian maupun barengan, atau saat ditanya "siapa ini"), langsung sapa/sebut namanya dengan yakin! Analisis juga hal lain di kamera (tulisan, benda, warna, cat, situasi) secara natural.'
       : 'Jika kamera aktif dan kamu menerima frame gambar, analisis dan bantu jelaskan apa pun yang terlihat (tulisan, soal, benda, masalah teknis, warna, cat, atau situasi sekitar) secara natural dan solutif.',
+    !options?.handoffFrom && options?.recentContext
+      ? `KONTEKS PERCAKAPAN SEBELUMNYA (LANJUTKAN SECARA NATURAL): ${options.recentContext.slice(0, 420)}`
+      : '',
     useSemiGaul
       ? 'PENGINGAT TERAKHIR: Bicara wajib pakai gaya semi-gaul ("gua"/"lu", santai, akrab), DILARANG keras menyebut "saya" atau "Anda".'
       : '',
@@ -660,11 +663,16 @@ export function formatGeminiError(err: unknown): { status: number; message: stri
     }
   }
 
-  if (rawMessage.includes('RESOURCE_EXHAUSTED') || status === 429) {
+  if (
+    rawMessage.includes('RESOURCE_EXHAUSTED') ||
+    rawMessage.toLowerCase().includes('quota') ||
+    rawMessage.toLowerCase().includes('rate limit') ||
+    status === 429
+  ) {
     return {
       status: 429,
       message:
-        'Batas kuota permintaan AI sementara tercapai. Tunggu beberapa saat lalu coba kirim ulang.',
+        'Batas kuota / limit permintaan AI sementara habis. Tunggu beberapa menit atau periksa kuota GEMINI_API_KEY Anda.',
     };
   }
 

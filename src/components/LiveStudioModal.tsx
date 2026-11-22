@@ -182,6 +182,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   const [isCameraOn, setIsCameraOn] = useState(initialCameraOn);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [micEnergy, setMicEnergy] = useState(0);
+  const [audioSuspended, setAudioSuspended] = useState(false);
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -198,6 +199,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const isMutedRef = useRef(isMuted);
   const isPausedRef = useRef(isPaused);
+  const isCameraOnRef = useRef(isCameraOn);
   const voiceRef = useRef<VoicePersonaId>(voice);
   const userRef = useRef<User | null>(user);
   const owieBuffersRef = useRef<AudioBuffer[]>([]);
@@ -206,14 +208,26 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   const transcriptsEndRef = useRef<HTMLDivElement>(null);
   const sessionInitIdRef = useRef(0);
 
+  const syncAudioSuspendedState = useCallback(() => {
+    const inSusp = inputAudioCtxRef.current?.state === 'suspended';
+    const outSusp = outputAudioCtxRef.current?.state === 'suspended';
+    setAudioSuspended(Boolean(inSusp || outSusp));
+  }, []);
+
   const ensureAudioContextsRunning = useCallback(() => {
+    const tasks: Array<Promise<void>> = [];
     if (inputAudioCtxRef.current?.state === 'suspended') {
-      void inputAudioCtxRef.current.resume().catch(() => {});
+      tasks.push(inputAudioCtxRef.current.resume().catch(() => {}));
     }
     if (outputAudioCtxRef.current?.state === 'suspended') {
-      void outputAudioCtxRef.current.resume().catch(() => {});
+      tasks.push(outputAudioCtxRef.current.resume().catch(() => {}));
     }
-  }, []);
+    if (tasks.length > 0) {
+      void Promise.all(tasks).finally(syncAudioSuspendedState);
+    } else {
+      syncAudioSuspendedState();
+    }
+  }, [syncAudioSuspendedState]);
 
   useEffect(() => {
     isMutedRef.current = isMuted;
@@ -222,6 +236,10 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   useEffect(() => {
     isPausedRef.current = isPaused;
   }, [isPaused]);
+
+  useEffect(() => {
+    isCameraOnRef.current = isCameraOn;
+  }, [isCameraOn]);
 
   useEffect(() => {
     voiceRef.current = voice;
@@ -496,11 +514,34 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     setStatus('connecting');
     setErrorMessage(null);
     setHandoffNotice(null);
+    setAudioSuspended(false);
 
     async function initLive() {
       cleanupSession();
 
       try {
+        const inputCtx = new AudioContext({ sampleRate: 16000 });
+        const outputCtx = new AudioContext({ sampleRate: 24000 });
+        const keepAudioAwake = (ctx: AudioContext) => {
+          ctx.onstatechange = () => {
+            if (!isCurrentInit()) return;
+            syncAudioSuspendedState();
+            if (ctx.state === 'suspended') {
+              void ctx.resume().then(syncAudioSuspendedState).catch(() => {});
+            }
+          };
+          if (ctx.state === 'suspended') {
+            void ctx.resume().then(syncAudioSuspendedState).catch(() => {});
+          }
+        };
+        keepAudioAwake(inputCtx);
+        keepAudioAwake(outputCtx);
+        inputAudioCtxRef.current = inputCtx;
+        outputAudioCtxRef.current = outputCtx;
+        syncAudioSuspendedState();
+        owieBuffersRef.current = [];
+        void preloadOwieBarks(outputCtx);
+
         const micStream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
@@ -514,29 +555,15 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         }
         micStreamRef.current = micStream;
 
-        const inputCtx = new AudioContext({ sampleRate: 16000 });
-        const outputCtx = new AudioContext({ sampleRate: 24000 });
-        const keepAudioAwake = (ctx: AudioContext) => {
-          ctx.onstatechange = () => {
-            if (isCurrentInit() && ctx.state !== 'running' && ctx.state !== 'closed') {
-              void ctx.resume().catch(() => {});
-            }
-          };
-          if (ctx.state !== 'running') {
-            void ctx.resume().catch(() => {});
-          }
-        };
-        keepAudioAwake(inputCtx);
-        keepAudioAwake(outputCtx);
-        inputAudioCtxRef.current = inputCtx;
-        outputAudioCtxRef.current = outputCtx;
-        owieBuffersRef.current = [];
-        void preloadOwieBarks(outputCtx);
-
         const idToken = await userRef.current?.getIdToken().catch(() => null);
         if (!isCurrentInit()) return;
 
-        const wsUrl = buildLiveWsUrl(connectTriggerVoice, activeMode, idToken);
+        const wsUrl = buildLiveWsUrl(
+          connectTriggerVoice,
+          activeMode,
+          idToken,
+          isCameraOnRef.current
+        );
 
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
@@ -748,6 +775,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     preloadOwieBarks,
     reconnectNonce,
     stopPlaybackQueue,
+    syncAudioSuspendedState,
     user?.uid,
   ]);
 
@@ -776,7 +804,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           await videoRef.current.play();
         }
 
-        videoIntervalRef.current = window.setInterval(() => {
+        const captureAndSendFrame = () => {
           if (isPausedRef.current) return;
           const video = videoRef.current;
           const activeWs = wsRef.current;
@@ -787,7 +815,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
 
           const w = video.videoWidth || 640;
           const h = video.videoHeight || 360;
-          const maxDim = 768;
+          const maxDim = 512;
           const scale = Math.min(1, maxDim / Math.max(w, h));
 
           const canvas = document.createElement('canvas');
@@ -797,7 +825,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           if (!ctx) return;
 
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
           const base64 = dataUrl.split(',')[1];
           if (base64) {
             try {
@@ -806,7 +834,10 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
               // Ignore transient video send failure
             }
           }
-        }, 1000);
+        };
+
+        captureAndSendFrame();
+        videoIntervalRef.current = window.setInterval(captureAndSendFrame, 1800);
       } catch {
         if (!cancelled) {
           setIsCameraOn(false);
@@ -957,6 +988,16 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           </div>
         )}
 
+        {audioSuspended && !errorMessage && (
+          <button
+            type="button"
+            onClick={ensureAudioContextsRunning}
+            className="mb-3 rounded-full border border-amber-400/50 bg-amber-950/80 px-4 py-1.5 text-xs font-semibold text-amber-100 backdrop-blur-md hover:bg-amber-900/90 transition-colors cursor-pointer"
+          >
+            Ketuk di sini untuk mengaktifkan mikrofon &amp; suara
+          </button>
+        )}
+
         {handoffNotice && !errorMessage && (
           <div className="mb-3 rounded-full border border-blue-400/40 bg-blue-950/75 px-4 py-1.5 text-xs font-medium text-blue-100 backdrop-blur-md">
             {handoffNotice}
@@ -1055,6 +1096,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
                     : 'Owie sedang menggonggong'
                   : `${activeVoiceLabel} sedang berbicara...`)}
               {status === 'paused' && 'Sesi Live dijeda'}
+              {status === 'error' && 'Koneksi terputus'}
             </p>
           </div>
         )}

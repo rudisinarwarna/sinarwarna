@@ -26,6 +26,7 @@ export async function onRequestGet(context: CfPagesContext): Promise<Response> {
   const rawVoice = urlObj.searchParams.get('voice') || 'awen';
   const mode = urlObj.searchParams.get('mode') || 'general';
   const token = urlObj.searchParams.get('token');
+  const initialCamera = urlObj.searchParams.get('camera') === '1';
 
   let bridge: ReturnType<typeof createLiveBridge> | null = null;
   let closedByClient = false;
@@ -108,6 +109,7 @@ export async function onRequestGet(context: CfPagesContext): Promise<Response> {
         ai,
         initialVoice: rawVoice,
         mode,
+        initialCamera,
         authContext,
         sendJson: safeSend,
         closeClient: safeClose,
