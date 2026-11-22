@@ -66,9 +66,9 @@ export const DEFAULT_ADMIN_PRIVATE_MEMORIES: AdminMemoryItem[] = [
   },
   {
     id: 'mem_default_cyndi',
-    title: 'Cyndi Calon CEO',
+    title: 'Cyndi Kuliah & Magang di Serpong',
     content:
-      'Cyndi (adik / ade dari Cynthia, anak Awen dan Santi) adalah calon CEO Sinar Warna yang bersiap berangkat mencari ilmu ke China.',
+      'Cyndi (adik / ade dari Cynthia, anak Awen dan Santi) saat ini berkuliah dekat Serpong dan sudah mau wisuda, namun sekarang sudah masuk masa magang. Cyndi tinggal di apartemen dekat tempat magangnya/kampusnya di Serpong, dan biasanya pulang ke rumah saat libur atau akhir pekan (sabtu & minggu), lalu minggu malam atau senin balik lagi ke apartemen di Serpong.',
   },
   {
     id: 'mem_default_cynthia_cyndi',
