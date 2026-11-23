@@ -1212,33 +1212,6 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           </div>
         )}
 
-        {/* Quick Media Action Bar */}
-        <div className="mb-2 flex flex-wrap items-center justify-center gap-2 px-2">
-          <button
-            type="button"
-            onClick={triggerLocationAndTraffic}
-            className="inline-flex items-center gap-1.5 rounded-full border border-blue-400/40 bg-[#0B0F1A]/75 px-3.5 py-1.5 text-xs font-semibold text-blue-200 backdrop-blur-md hover:bg-blue-900/50 transition-colors cursor-pointer shadow-lg"
-          >
-            <MapPin className="h-3.5 w-3.5 text-[#FF4D5A]" />
-            <span>Peta &amp; Lalulintas</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => triggerImageBubble('Sinar Warna Display')}
-            className="inline-flex items-center gap-1.5 rounded-full border border-purple-400/40 bg-[#0B0F1A]/75 px-3.5 py-1.5 text-xs font-semibold text-purple-200 backdrop-blur-md hover:bg-purple-900/50 transition-colors cursor-pointer shadow-lg"
-          >
-            <ImageIcon className="h-3.5 w-3.5 text-purple-400" />
-            <span>Minta Gambar</span>
-          </button>
-          <button
-            type="button"
-            onClick={triggerVideoBubble}
-            className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-[#0B0F1A]/75 px-3.5 py-1.5 text-xs font-semibold text-emerald-200 backdrop-blur-md hover:bg-emerald-900/50 transition-colors cursor-pointer shadow-lg"
-          >
-            <Video className="h-3.5 w-3.5 text-emerald-400" />
-            <span>Video Tur</span>
-          </button>
-        </div>
 
         {/* Floating Rich Media Bubbles (Transparent Background for images/videos/maps, styled elegant background for text info) */}
         {mediaBubbles.length > 0 && (
