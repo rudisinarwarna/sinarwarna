@@ -61,6 +61,7 @@ import {
   isPrimaryAdminUser,
   isUserVerifiedAccount,
   saveMessageDoc,
+  saveMessagesBatch,
   subscribeConversations,
   subscribeMessages,
   updateConversationMeta,
@@ -351,10 +352,11 @@ export default function App() {
   }, [authReady, isCloudUser, user]);
 
   // Subscribe to messages for the active cloud conversation
+  const existsInCloud = Boolean(
+    activeConversationId && cloudConversations.some((c) => c.id === activeConversationId)
+  );
   useEffect(() => {
-    if (!authReady || !isCloudUser || !user || !activeConversationId) return;
-    const existsInCloud = cloudConversations.some((c) => c.id === activeConversationId);
-    if (!existsInCloud) return;
+    if (!authReady || !isCloudUser || !user || !activeConversationId || !existsInCloud) return;
 
     const unsubscribe = subscribeMessages(
       activeConversationId,
@@ -371,7 +373,7 @@ export default function App() {
     );
 
     return () => unsubscribe();
-  }, [authReady, isCloudUser, user, activeConversationId, cloudConversations]);
+  }, [authReady, isCloudUser, user?.uid, activeConversationId, existsInCloud]);
 
   // Keep lightweight auth & sidebar summary cache synchronized for instant reload
   useEffect(() => {
@@ -816,7 +818,6 @@ export default function App() {
               text: accumulatedText,
               error: streamError,
             });
-            await updateConversationMeta(convId, {});
           } catch (saveErr) {
             console.error('Failed to persist model message to Firestore:', saveErr);
           }
@@ -1047,7 +1048,7 @@ export default function App() {
   const handleLiveClose = useCallback(
     async (transcriptLog?: Array<{ role: 'user' | 'model'; text: string }>) => {
       setLiveModalOpen(false);
-      if (!transcriptLog || transcriptLog.length === 0) return;
+      if (!showLiveTranscript || !transcriptLog || transcriptLog.length === 0) return;
 
       // Normalize non-empty entries and merge adjacent same-role entries
       const normalized: Array<{ role: 'user' | 'model'; text: string }> = [];
@@ -1056,7 +1057,7 @@ export default function App() {
         if (!cleanText) continue;
         const last = normalized[normalized.length - 1];
         if (last && last.role === entry.role) {
-          last.text = `${last.text} ${cleanText}`;
+          last.text = `${last.text}\n${cleanText}`;
         } else {
           normalized.push({ role: entry.role, text: cleanText });
         }
@@ -1087,15 +1088,12 @@ export default function App() {
           setActiveConversationId(targetConvId);
           try {
             await createConversationDoc(cloudUser.uid, targetConvId, liveTitle, activeMode);
-            for (const msg of newMessages) {
-              await saveMessageDoc({
-                userId: cloudUser.uid,
-                conversationId: targetConvId,
-                messageId: msg.id,
-                role: msg.role,
-                text: msg.text,
-              });
-            }
+            // Optimization: Write all messages in 1 atomic batch rather than individual round-trips
+            await saveMessagesBatch({
+              userId: cloudUser.uid,
+              conversationId: targetConvId,
+              messages: newMessages,
+            });
           } catch (err) {
             console.error('Failed to persist live transcript to Firestore:', err);
           }
@@ -1116,16 +1114,12 @@ export default function App() {
           [targetConvId!]: [...(prev[targetConvId!] || []), ...newMessages],
         }));
         try {
-          for (const msg of newMessages) {
-            await saveMessageDoc({
-              userId: cloudUser.uid,
-              conversationId: targetConvId,
-              messageId: msg.id,
-              role: msg.role,
-              text: msg.text,
-            });
-          }
-          await updateConversationMeta(targetConvId, {});
+          // Optimization: Append all messages in 1 atomic batch rather than individual round-trips
+          await saveMessagesBatch({
+            userId: cloudUser.uid,
+            conversationId: targetConvId,
+            messages: newMessages,
+          });
         } catch (err) {
           console.error('Failed to append live transcript to Firestore:', err);
         }

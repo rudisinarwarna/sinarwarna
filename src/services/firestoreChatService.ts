@@ -3,6 +3,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
   query,
   serverTimestamp,
@@ -68,6 +69,9 @@ export interface UpsertProfileResult {
   deleted: boolean;
 }
 
+const PROFILE_SYNC_PREFIX = 'sw_prof_sync_';
+const ADMIN_GRANT_PREFIX = 'sw_adm_grant_';
+
 export async function upsertUserProfile(user: User): Promise<UpsertProfileResult> {
   const uid = sanitizeId(user.uid);
   const path = `users/${uid}`;
@@ -80,6 +84,27 @@ export async function upsertUserProfile(user: User): Promise<UpsertProfileResult
   const cleanEmail = extractUserEmail(user).slice(0, 200);
   const photoUrl = user.photoURL ? user.photoURL.slice(0, 500) : undefined;
   const primaryAdmin = isPrimaryAdminUser(user);
+
+  // Optimization: Skip redundant Firestore read and write if already synced in current session
+  const profileSig = `${displayName}|${cleanEmail}|${photoUrl || ''}|${primaryAdmin ? '1' : '0'}`;
+  try {
+    if (typeof window !== 'undefined') {
+      const cached = sessionStorage.getItem(`${PROFILE_SYNC_PREFIX}${uid}`);
+      if (cached) {
+        const parsed = JSON.parse(cached) as { sig: string; time: number; role: UserRole; verifiedBadge: boolean };
+        if (parsed.sig === profileSig && Date.now() - parsed.time < 30 * 60 * 1000) {
+          return {
+            role: parsed.role,
+            verifiedBadge: parsed.verifiedBadge,
+            blocked: false,
+            deleted: false,
+          };
+        }
+      }
+    }
+  } catch {
+    // Ignore storage parse error
+  }
 
   try {
     const snap = await getDoc(userRef);
@@ -102,6 +127,16 @@ export async function upsertUserProfile(user: User): Promise<UpsertProfileResult
 
       if (primaryAdmin) {
         await ensurePrimaryAdminGrant(user);
+      }
+      try {
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem(
+            `${PROFILE_SYNC_PREFIX}${uid}`,
+            JSON.stringify({ sig: profileSig, time: Date.now(), role, verifiedBadge })
+          );
+        }
+      } catch {
+        // Ignore quota error
       }
       return { role, verifiedBadge, blocked: false, deleted: false };
     }
@@ -144,6 +179,17 @@ export async function upsertUserProfile(user: User): Promise<UpsertProfileResult
       await ensurePrimaryAdminGrant(user);
     }
 
+    try {
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem(
+          `${PROFILE_SYNC_PREFIX}${uid}`,
+          JSON.stringify({ sig: profileSig, time: Date.now(), role, verifiedBadge })
+        );
+      }
+    } catch {
+      // Ignore quota error
+    }
+
     return { role, verifiedBadge, blocked: false, deleted: false };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -154,6 +200,12 @@ async function ensurePrimaryAdminGrant(user: User): Promise<void> {
   const uid = sanitizeId(user.uid);
   const adminRef = doc(db, 'admins', uid);
   const path = `admins/${uid}`;
+
+  // Optimization: Skip if already verified in session
+  if (typeof window !== 'undefined' && sessionStorage.getItem(`${ADMIN_GRANT_PREFIX}${uid}`) === 'true') {
+    return;
+  }
+
   try {
     const snap = await getDoc(adminRef);
     if (!snap.exists()) {
@@ -172,6 +224,9 @@ async function ensurePrimaryAdminGrant(user: User): Promise<void> {
         updatedAt: serverTimestamp(),
       });
     }
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem(`${ADMIN_GRANT_PREFIX}${uid}`, 'true');
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -184,7 +239,8 @@ export function subscribeConversations(
 ): Unsubscribe {
   const uid = sanitizeId(userId);
   const path = 'conversations';
-  const q = query(collection(db, path), where('userId', '==', uid));
+  // Optimization: limit to 50 most relevant conversations to prevent unbounded read rows
+  const q = query(collection(db, path), where('userId', '==', uid), limit(50));
 
   return onSnapshot(
     q,
@@ -221,7 +277,8 @@ export function subscribeMessages(
   const convId = sanitizeId(conversationId);
   const uid = sanitizeId(userId);
   const path = `conversations/${convId}/messages`;
-  const q = query(collection(db, 'conversations', convId, 'messages'), where('userId', '==', uid));
+  // Optimization: limit to 100 messages per conversation to control read row usage
+  const q = query(collection(db, 'conversations', convId, 'messages'), where('userId', '==', uid), limit(100));
 
   return onSnapshot(
     q,
@@ -281,6 +338,10 @@ export async function updateConversationMeta(
   convId: string,
   updates: { title?: string; mode?: CreativeModeId }
 ): Promise<void> {
+  // Optimization: If neither title nor mode changed, skip redundant write to save Firestore write quota
+  if (!updates.title && !updates.mode) {
+    return;
+  }
   const safeId = sanitizeId(convId);
   const path = `conversations/${safeId}`;
   const payload: Record<string, unknown> = {
@@ -337,6 +398,50 @@ export async function saveMessageDoc(params: {
     await setDoc(doc(db, 'conversations', safeConvId, 'messages', safeMsgId), payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function saveMessagesBatch(params: {
+  userId: string;
+  conversationId: string;
+  messages: Array<{
+    id: string;
+    role: 'user' | 'model';
+    text: string;
+    attachmentNames?: string[];
+    error?: string;
+  }>;
+}): Promise<void> {
+  if (params.messages.length === 0) return;
+  const safeConvId = sanitizeId(params.conversationId);
+  const uid = sanitizeId(params.userId);
+  const path = `conversations/${safeConvId}/messages`;
+
+  const batch = writeBatch(db);
+  for (const msg of params.messages.slice(0, 100)) {
+    const safeMsgId = sanitizeId(msg.id);
+    const ref = doc(db, 'conversations', safeConvId, 'messages', safeMsgId);
+    const payload: Record<string, unknown> = {
+      id: safeMsgId,
+      conversationId: safeConvId,
+      userId: uid,
+      role: msg.role,
+      text: msg.text.slice(0, 32000),
+      createdAt: serverTimestamp(),
+    };
+    if (msg.attachmentNames && msg.attachmentNames.length > 0) {
+      payload.attachmentNames = msg.attachmentNames.slice(0, 3).map((n) => n.slice(0, 120));
+    }
+    if (msg.error) {
+      payload.error = msg.error.slice(0, 500);
+    }
+    batch.set(ref, payload);
+  }
+
+  try {
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 

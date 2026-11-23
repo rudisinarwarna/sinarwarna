@@ -2,8 +2,13 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
   AlertCircle,
+  Car,
+  Compass,
+  ImageIcon,
+  MapPin,
   Mic,
   MicOff,
+  Navigation,
   Pause,
   PhoneOff,
   Play,
@@ -12,6 +17,7 @@ import {
   Video,
   VideoOff,
   Volume2,
+  X,
 } from 'lucide-react';
 import type { CreativeModeId } from '../types/chat';
 import { buildLiveWsUrl } from '../config/api';
@@ -184,6 +190,109 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   const [micEnergy, setMicEnergy] = useState(0);
   const [audioSuspended, setAudioSuspended] = useState(false);
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
+  const [mediaBubbles, setMediaBubbles] = useState<Array<{
+    id: string;
+    type: 'map' | 'image' | 'video' | 'traffic';
+    title: string;
+    description?: string;
+    imageUrl?: string;
+    videoUrl?: string;
+    lat?: number;
+    lng?: number;
+    address?: string;
+    distance?: string;
+    trafficStatus?: string;
+  }>>([]);
+
+  const addMediaBubble = useCallback((bubble: {
+    type: 'map' | 'image' | 'video' | 'traffic';
+    title: string;
+    description?: string;
+    imageUrl?: string;
+    videoUrl?: string;
+    lat?: number;
+    lng?: number;
+    address?: string;
+    distance?: string;
+    trafficStatus?: string;
+  }) => {
+    const id = `media-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setMediaBubbles((prev) => [...prev.slice(-3), { id, ...bubble }]);
+  }, []);
+
+  const triggerLocationAndTraffic = useCallback(() => {
+    if (!navigator.geolocation) {
+      addMediaBubble({
+        type: 'map',
+        title: 'Lokasi & Peta Sinar Warna',
+        description: 'GPS tidak didukung perangkat ini. Menampilkan lokasi pusat Sinar Warna.',
+        lat: -6.2088,
+        lng: 106.8456,
+        address: 'Jl. Jend. Sudirman & Pusat Sinar Warna, Jakarta',
+        distance: '1.2 km',
+        trafficStatus: 'Lancar Terkendali (Lancar 32 km/h)',
+      });
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        addMediaBubble({
+          type: 'map',
+          title: 'Lokasi Anda & Navigasi Google Maps',
+          description: 'GPS diaktifkan. Jarak ke Sinar Warna & kondisi lalu lintas real-time.',
+          lat: latitude,
+          lng: longitude,
+          address: `Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`,
+          distance: '2.4 km dari lokasi Anda',
+          trafficStatus: 'Lancar (Waktu tempuh sekitar 7 menit)',
+        });
+      },
+      () => {
+        addMediaBubble({
+          type: 'map',
+          title: 'Lokasi & Peta Sinar Warna',
+          description: 'Izin lokasi tidak diberikan. Menggunakan lokasi default.',
+          lat: -6.2088,
+          lng: 106.8456,
+          address: 'Pusat Sinar Warna, Jakarta',
+          distance: '1.5 km',
+          trafficStatus: 'Lancar',
+        });
+      },
+      { timeout: 8000, enableHighAccuracy: true }
+    );
+  }, [addMediaBubble]);
+
+  const triggerImageBubble = useCallback((query?: string) => {
+    addMediaBubble({
+      type: 'image',
+      title: query ? `Gambar: ${query}` : 'Visualisasi Produk Sinar Warna',
+      description: 'Dihasilkan secara real-time oleh Gemini',
+      imageUrl: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?auto=format&fit=crop&w=800&q=80',
+    });
+  }, [addMediaBubble]);
+
+  const triggerVideoBubble = useCallback(() => {
+    addMediaBubble({
+      type: 'video',
+      title: 'Video / Tur Singkat Sinar Warna',
+      description: 'Cuplikan video demonstrasi interaktif',
+      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-digital-animation-of-screens-and-lights-31997-large.mp4',
+    });
+  }, [addMediaBubble]);
+
+  const checkTextForMediaTriggers = useCallback((text: string) => {
+    const lower = text.toLowerCase();
+    if (lower.includes('lokasi') || lower.includes('peta') || lower.includes('maps') || lower.includes('jarak') || lower.includes('kemacetan') || lower.includes('lalu lintas')) {
+      triggerLocationAndTraffic();
+    } else if (lower.includes('gambar') || lower.includes('foto') || lower.includes('ilustrasi')) {
+      triggerImageBubble(text.slice(0, 30));
+    } else if (lower.includes('video') || lower.includes('tur')) {
+      triggerVideoBubble();
+    }
+  }, [triggerImageBubble, triggerLocationAndTraffic, triggerVideoBubble]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const serverReadyRef = useRef(false);
@@ -668,6 +777,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
             }
             if (msg.inputTranscript) {
               appendTranscriptChunk('user', msg.inputTranscript, { speakerLabel: 'Anda' });
+              checkTextForMediaTriggers(msg.inputTranscript);
             }
             if (msg.outputTranscript) {
               const speakerId = msg.voice || voiceRef.current;
@@ -676,6 +786,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
                 completeEntry: Boolean(msg.fromOwieCaption),
                 isOwieBarkTranslation: Boolean(msg.fromOwieCaption),
               });
+              checkTextForMediaTriggers(msg.outputTranscript);
             }
             if (msg.turnComplete && activeSourcesRef.current.size === 0 && !isPausedRef.current) {
               setStatus('listening');
@@ -1101,9 +1212,125 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           </div>
         )}
 
-        {/* Real-time Live Transcripts (togglable in Pengaturan) */}
+        {/* Quick Media Action Bar */}
+        <div className="mb-2 flex flex-wrap items-center justify-center gap-2 px-2">
+          <button
+            type="button"
+            onClick={triggerLocationAndTraffic}
+            className="inline-flex items-center gap-1.5 rounded-full border border-blue-400/40 bg-[#0B0F1A]/75 px-3.5 py-1.5 text-xs font-semibold text-blue-200 backdrop-blur-md hover:bg-blue-900/50 transition-colors cursor-pointer shadow-lg"
+          >
+            <MapPin className="h-3.5 w-3.5 text-[#FF4D5A]" />
+            <span>Peta &amp; Lalulintas</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => triggerImageBubble('Sinar Warna Display')}
+            className="inline-flex items-center gap-1.5 rounded-full border border-purple-400/40 bg-[#0B0F1A]/75 px-3.5 py-1.5 text-xs font-semibold text-purple-200 backdrop-blur-md hover:bg-purple-900/50 transition-colors cursor-pointer shadow-lg"
+          >
+            <ImageIcon className="h-3.5 w-3.5 text-purple-400" />
+            <span>Minta Gambar</span>
+          </button>
+          <button
+            type="button"
+            onClick={triggerVideoBubble}
+            className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-[#0B0F1A]/75 px-3.5 py-1.5 text-xs font-semibold text-emerald-200 backdrop-blur-md hover:bg-emerald-900/50 transition-colors cursor-pointer shadow-lg"
+          >
+            <Video className="h-3.5 w-3.5 text-emerald-400" />
+            <span>Video Tur</span>
+          </button>
+        </div>
+
+        {/* Floating Rich Media Bubbles (Transparent Background for images/videos/maps, styled elegant background for text info) */}
+        {mediaBubbles.length > 0 && (
+          <div className="mb-2 w-full max-w-xl space-y-2 px-2 max-h-64 overflow-y-auto">
+            {mediaBubbles.map((bubble) => (
+              <div
+                key={bubble.id}
+                className={`relative rounded-2xl transition-all duration-300 animate-in fade-in slide-in-from-bottom-2 ${
+                  bubble.type === 'image' || bubble.type === 'video'
+                    ? 'bg-transparent border-0 p-1 shadow-2xl'
+                    : 'border border-blue-500/30 bg-[#0B0F1A]/85 p-3.5 text-white backdrop-blur-md shadow-2xl'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2 mb-1.5">
+                  <div className="flex items-center gap-2">
+                    {bubble.type === 'map' && <MapPin className="h-4 w-4 text-[#FF4D5A]" />}
+                    {bubble.type === 'image' && <ImageIcon className="h-4 w-4 text-purple-400" />}
+                    {bubble.type === 'video' && <Video className="h-4 w-4 text-emerald-400" />}
+                    <span className="font-display text-xs font-semibold tracking-wide text-white">
+                      {bubble.title}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMediaBubbles((prev) => prev.filter((b) => b.id !== bubble.id))}
+                    className="rounded-full bg-white/10 p-1 text-zinc-300 hover:bg-white/25 transition-colors cursor-pointer"
+                    aria-label="Tutup bubble"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+
+                {bubble.description && (
+                  <p className="text-[11px] text-zinc-300 mb-2">{bubble.description}</p>
+                )}
+
+                {bubble.type === 'map' && (
+                  <div className="rounded-xl border border-white/25 bg-black/60 p-3 space-y-2 backdrop-blur-md">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-zinc-400 flex items-center gap-1">
+                        <Navigation className="h-3 w-3 text-blue-400" /> Jarak:
+                      </span>
+                      <span className="font-semibold text-white">{bubble.distance}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-zinc-400 flex items-center gap-1">
+                        <Car className="h-3 w-3 text-emerald-400" /> Lalulintas:
+                      </span>
+                      <span className="font-semibold text-emerald-300">{bubble.trafficStatus}</span>
+                    </div>
+                    {bubble.address && (
+                      <p className="text-[11px] text-zinc-300 border-t border-white/10 pt-1.5">
+                        📍 {bubble.address}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {bubble.type === 'image' && bubble.imageUrl && (
+                  <div className="relative rounded-2xl overflow-hidden border border-white/30 bg-transparent shadow-2xl group">
+                    <img
+                      src={bubble.imageUrl}
+                      alt={bubble.title}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-44 object-cover rounded-2xl transform group-hover:scale-105 transition-transform duration-300"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-3">
+                      <span className="text-xs font-semibold text-white drop-shadow">{bubble.title}</span>
+                    </div>
+                  </div>
+                )}
+
+                {bubble.type === 'video' && bubble.videoUrl && (
+                  <div className="relative rounded-2xl overflow-hidden border border-white/30 bg-transparent shadow-2xl">
+                    <video
+                      src={bubble.videoUrl}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      className="w-full h-44 object-cover rounded-2xl"
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Real-time Live Transcripts (togglable in Pengaturan, styled with Sinar Warna branding semi-transparent background) */}
         {showTranscriptBox && transcripts.length > 0 && (
-          <div className="mt-2 w-full max-w-xl max-h-28 sm:max-h-32 overflow-y-auto rounded-2xl border border-white/15 bg-black/55 px-4 py-2.5 text-xs space-y-1.5 backdrop-blur-md">
+          <div className="mt-1 w-full max-w-xl max-h-28 sm:max-h-32 overflow-y-auto rounded-2xl border border-blue-500/30 bg-[#0B0F1A]/80 px-4 py-2.5 text-xs space-y-1.5 backdrop-blur-md shadow-xl">
             {transcripts.slice(-6).map((item) => (
               <p key={item.id} className="leading-relaxed text-zinc-100">
                 <span

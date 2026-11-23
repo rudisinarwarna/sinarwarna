@@ -168,8 +168,14 @@ export function subscribeOwnUserAccess(
   };
 }
 
+const SEED_CACHE_KEY_PREFIX = 'sw_admin_seed_v3_';
+
 export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<void> {
   const uid = sanitizeId(adminUser.uid);
+  // Optimization: Skip redundant Firestore seed check if already verified on this device
+  if (typeof window !== 'undefined' && localStorage.getItem(`${SEED_CACHE_KEY_PREFIX}${uid}`) === 'true') {
+    return;
+  }
   const seedRef = doc(db, 'adminMeta', 'seed');
   try {
     const seedSnap = await getDoc(seedRef);
@@ -195,6 +201,9 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
       selfCameraReactSeeded &&
       owiePhotoSeeded
     ) {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`${SEED_CACHE_KEY_PREFIX}${uid}`, 'true');
+      }
       return;
     }
 
@@ -323,6 +332,9 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
     }
 
     await batch.commit();
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`${SEED_CACHE_KEY_PREFIX}${uid}`, 'true');
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'adminMeta/seed');
   }
