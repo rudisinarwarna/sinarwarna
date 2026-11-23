@@ -162,8 +162,12 @@ export async function runChatStreamWithTools(params: {
       },
     ];
     for (const pm of photoMemories) {
+      const cleanData = (pm.imageData || '')
+        .replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '')
+        .trim();
+      if (!cleanData) continue;
       photoParts.push({ text: `Foto Referensi [${pm.title}]: ${pm.content}` });
-      photoParts.push({ inlineData: { mimeType: 'image/jpeg', data: pm.imageData } });
+      photoParts.push({ inlineData: { mimeType: 'image/jpeg', data: cleanData } });
     }
     photoPrimerTurns.push({ role: 'user', parts: photoParts });
     photoPrimerTurns.push({

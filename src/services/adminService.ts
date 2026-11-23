@@ -245,32 +245,47 @@ export async function seedDefaultAdminMemoriesOnce(adminUser: User): Promise<voi
         ) {
           continue;
         }
+        const cleanImageData = photoMem.imageData
+          .replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '')
+          .trim()
+          .slice(0, 160000);
         const existingDoc = existingById.get(photoMem.id);
         if (!existingDoc) {
           batch.set(doc(db, 'adminMemories', photoMem.id), {
             id: photoMem.id,
             title: photoMem.title.slice(0, 120),
             content: photoMem.content.slice(0, 2000),
-            imageData: photoMem.imageData.slice(0, 160000),
+            imageData: cleanImageData,
             createdBy: uid,
             createdByEmail: (adminUser.email || '').slice(0, 200),
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });
-        } else if (
-          photoMem.id === 'mem_default_foto_rudi_hongkwe' &&
-          !founderAngkuiSeeded
-        ) {
-          const existingContent = String(existingDoc.data()?.content || '');
-          if (existingContent.includes('memanggilnya "Kui"') || !existingContent.includes('Angkui')) {
-            const nextContent = existingContent.includes('memanggilnya "Kui"')
-              ? existingContent.replace('memanggilnya "Kui"', 'memanggilnya "Angkui"')
-              : photoMem.content;
+        } else {
+          const existingData = existingDoc.data();
+          const existingImage = typeof existingData?.imageData === 'string' ? existingData.imageData : '';
+          const hasBadPrefix = existingImage.startsWith('data:image/');
+          if (hasBadPrefix) {
             batch.update(existingDoc.ref, {
-              title: photoMem.title.slice(0, 120),
-              content: nextContent.slice(0, 2000),
+              imageData: existingImage.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '').trim().slice(0, 160000),
               updatedAt: serverTimestamp(),
             });
+          }
+          if (
+            photoMem.id === 'mem_default_foto_rudi_hongkwe' &&
+            !founderAngkuiSeeded
+          ) {
+            const existingContent = String(existingData?.content || '');
+            if (existingContent.includes('memanggilnya "Kui"') || !existingContent.includes('Angkui')) {
+              const nextContent = existingContent.includes('memanggilnya "Kui"')
+                ? existingContent.replace('memanggilnya "Kui"', 'memanggilnya "Angkui"')
+                : photoMem.content;
+              batch.update(existingDoc.ref, {
+                title: photoMem.title.slice(0, 120),
+                content: nextContent.slice(0, 2000),
+                updatedAt: serverTimestamp(),
+              });
+            }
           }
         }
       }
@@ -547,8 +562,9 @@ export function subscribeAdminMemories(
       const list: AdminMemoryDoc[] = snapshot.docs.map((d) => {
         const data = d.data();
         const rawImage = typeof data.imageData === 'string' ? data.imageData : '';
+        const cleanImage = rawImage.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '').trim();
         const imageData =
-          rawImage.length > 0 && rawImage.length <= 160000 ? rawImage : undefined;
+          cleanImage.length > 0 && cleanImage.length <= 160000 ? cleanImage : undefined;
         return {
           id: String(data.id || d.id),
           title: String(data.title || 'Pengingat'),

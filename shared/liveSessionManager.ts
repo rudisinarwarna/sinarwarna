@@ -184,13 +184,17 @@ export function createLiveBridge(params: {
       },
     ];
     for (const pm of photoMemories) {
+      const cleanData = (pm.imageData || '')
+        .replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '')
+        .trim();
+      if (!cleanData) continue;
       parts.push({
         text: `Foto Referensi [${pm.title}]: ${pm.content}`,
       });
       parts.push({
         inlineData: {
           mimeType: 'image/jpeg',
-          data: pm.imageData,
+          data: cleanData,
         },
       });
     }

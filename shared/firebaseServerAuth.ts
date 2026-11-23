@@ -217,9 +217,13 @@ export async function fetchAdminMemoriesServerWithStatus(
     const memories = (data.documents || [])
       .map((d) => {
         const rawImage = d.fields?.imageData?.stringValue;
+        const cleanImage =
+          typeof rawImage === 'string'
+            ? rawImage.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '').trim()
+            : '';
         const imageData =
-          typeof rawImage === 'string' && rawImage.length > 0 && rawImage.length <= 160000
-            ? rawImage
+          cleanImage.length > 0 && cleanImage.length <= 160000
+            ? cleanImage
             : undefined;
         return {
           id: d.fields?.id?.stringValue || getDocIdFromName(d.name),

@@ -624,10 +624,12 @@ export function buildContents(messages: IncomingMessage[]): Content[] {
       if (msg.attachments && Array.isArray(msg.attachments)) {
         for (const att of msg.attachments) {
           if (att?.mimeType && att?.data) {
+            const cleanAttData = att.data.replace(/^data:[^;]+;base64,/, '').trim();
+            if (!cleanAttData) continue;
             parts.push({
               inlineData: {
                 mimeType: att.mimeType,
-                data: att.data,
+                data: cleanAttData,
               },
             });
           }
