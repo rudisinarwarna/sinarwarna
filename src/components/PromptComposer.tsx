@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import type { ImageAttachment } from '../types/chat';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface PromptComposerProps {
   isStreaming: boolean;
@@ -74,6 +75,7 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
+  const { t } = useLanguage();
   const speechSupported = Boolean(getSpeechRecognitionCtor());
 
   useEffect(() => {
@@ -81,14 +83,14 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
       setUploadError(null);
       setAttachments((prev) => {
         if (prev.length >= 3) {
-          setUploadError('Maksimal 3 gambar referensi per pesan.');
+          setUploadError(t.composer.maxImagesError);
           return prev;
         }
         return [...prev, pendingCameraAttachment];
       });
       onConsumePendingCameraAttachment?.();
     }
-  }, [pendingCameraAttachment, onConsumePendingCameraAttachment]);
+  }, [pendingCameraAttachment, onConsumePendingCameraAttachment, t.composer.maxImagesError]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -108,7 +110,7 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
     const list = Array.from(files);
     const remainingSlots = 3 - attachments.length;
     if (remainingSlots <= 0) {
-      setUploadError('Maksimal 3 gambar referensi per pesan.');
+      setUploadError(t.composer.maxImagesError);
       return;
     }
 
@@ -117,18 +119,18 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
 
     for (const file of accepted) {
       if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) {
-        setUploadError('Format gambar yang didukung: PNG, JPG, WEBP, atau GIF.');
+        setUploadError(t.composer.unsupportedFormatError);
         continue;
       }
       if (file.size > 4 * 1024 * 1024) {
-        setUploadError('Ukuran tiap gambar maksimal 4 MB.');
+        setUploadError(t.composer.maxSizeError);
         continue;
       }
 
       const rawDataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result || ''));
-        reader.onerror = () => reject(new Error('Gagal membaca file'));
+        reader.onerror = () => reject(new Error(t.composer.fileReadError));
         reader.readAsDataURL(file);
       });
 
@@ -215,15 +217,13 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
 
     const SpeechCtor = getSpeechRecognitionCtor();
     if (!SpeechCtor) {
-      setUploadError(
-        'Dikte suara belum didukung di peramban ini. Ketuk tombol Live untuk berbicara langsung.'
-      );
+      setUploadError(t.composer.speechNotSupported);
       return;
     }
 
     try {
       const recognition = new SpeechCtor();
-      recognition.lang = 'id-ID';
+      recognition.lang = t.composer.speechLang;
       recognition.interimResults = false;
       recognition.maxAlternatives = 1;
 
@@ -300,8 +300,8 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Tanyakan apa saja ke Sinar Warna..."
-          aria-label="Tulis pesan untuk Sinar Warna"
+          placeholder={t.composer.placeholder}
+          aria-label={t.composer.ariaLabel}
           className="w-full resize-none bg-transparent px-4 pt-3.5 pb-1.5 text-[15px] leading-relaxed text-zinc-900 placeholder:text-zinc-500 dark:text-[#E3E3E3] dark:placeholder:text-zinc-400 focus:outline-none max-h-[180px]"
         />
 
@@ -325,23 +325,23 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              title="Unggah gambar referensi"
-              aria-label="Unggah gambar referensi"
+              title={t.composer.imageTooltip}
+              aria-label={t.composer.imageTooltip}
               className="inline-flex h-11 w-11 sm:w-auto sm:px-3 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-zinc-600 hover:bg-blue-600/10 hover:text-[#0A36FF] dark:text-zinc-300 dark:hover:bg-blue-500/15 dark:hover:text-blue-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
               <ImagePlus className="h-5 w-5 sm:h-4 sm:w-4" />
-              <span className="hidden sm:inline">Gambar</span>
+              <span className="hidden sm:inline">{t.composer.imageBtn}</span>
             </button>
 
             <button
               type="button"
               onClick={onOpenCamera}
-              title="Ambil foto dari kamera"
-              aria-label="Ambil foto dari kamera"
+              title={t.composer.cameraTooltip}
+              aria-label={t.composer.cameraTooltip}
               className="inline-flex h-11 w-11 sm:w-auto sm:px-3 items-center justify-center gap-1.5 rounded-full text-xs font-medium text-zinc-600 hover:bg-red-600/10 hover:text-[#E51D2B] dark:text-zinc-300 dark:hover:bg-red-500/15 dark:hover:text-red-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
               <Camera className="h-5 w-5 sm:h-4 sm:w-4" />
-              <span className="hidden sm:inline">Kamera</span>
+              <span className="hidden sm:inline">{t.composer.cameraBtn}</span>
             </button>
           </div>
 
@@ -352,11 +352,11 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
               title={
                 speechSupported
                   ? isListening
-                    ? 'Hentikan dikte suara'
-                    : 'Dikte suara'
-                  : 'Dikte suara (ketuk untuk info)'
+                    ? t.composer.micStopTooltip
+                    : t.composer.micStartTooltip
+                  : t.composer.micInfoTooltip
               }
-              aria-label={isListening ? 'Hentikan dikte suara' : 'Dikte suara'}
+              aria-label={isListening ? t.composer.micStopTooltip : t.composer.micStartTooltip}
               className={`inline-flex h-10 w-10 items-center justify-center rounded-full transition-colors cursor-pointer shrink-0 ${
                 isListening
                   ? 'bg-[#E51D2B]/20 text-[#E51D2B] dark:text-red-300 animate-pulse'
@@ -370,20 +370,20 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
             <button
               type="button"
               onClick={onOpenLive}
-              title="Mulai Sinar Warna Live (Suara & Kamera)"
-              aria-label="Mulai Sinar Warna Live"
+              title={t.composer.liveTooltip}
+              aria-label={t.composer.liveTooltip}
               className="inline-flex h-10 sm:h-11 items-center gap-1.5 rounded-full border border-blue-500/35 bg-gradient-to-r from-[#E51D2B]/12 to-[#0A36FF]/15 px-3 sm:px-3.5 text-xs font-semibold text-[#0A36FF] hover:from-[#E51D2B]/20 hover:to-[#0A36FF]/25 dark:border-blue-400/35 dark:text-blue-200 transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
               <AudioLines className="h-4 w-4 text-[#E51D2B] dark:text-[#FF4D5A]" />
-              <span>Live</span>
+              <span>{t.composer.liveBtn}</span>
             </button>
 
             {isStreaming ? (
               <button
                 type="button"
                 onClick={onStop}
-                title="Hentikan respons"
-                aria-label="Hentikan respons"
+                title={t.composer.stopTooltip}
+                aria-label={t.composer.stopTooltip}
                 className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[#E51D2B] text-white hover:bg-red-700 transition-colors cursor-pointer"
               >
                 <Square className="h-4 w-4 fill-current" />
@@ -393,8 +393,8 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
                 type="button"
                 onClick={handleSubmit}
                 disabled={!canSend}
-                title="Kirim pesan"
-                aria-label="Kirim pesan"
+                title={t.composer.sendTooltip}
+                aria-label={t.composer.sendTooltip}
                 className={`inline-flex h-11 w-11 items-center justify-center rounded-full transition-all ${
                   canSend
                     ? 'bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] text-white shadow-md shadow-blue-600/25 hover:opacity-95 cursor-pointer'
@@ -409,7 +409,7 @@ export const PromptComposer: React.FC<PromptComposerProps> = ({
       </div>
 
       <p className="mt-1.5 text-center text-[11px] text-zinc-500 dark:text-zinc-500">
-        Sinar Warna dapat membuat kekeliruan. Periksa kembali hasil kreatif penting Anda.
+        {t.composer.disclaimer}
       </p>
     </div>
   );

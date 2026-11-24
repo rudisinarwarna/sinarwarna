@@ -29,6 +29,12 @@ import {
   persistentMultipleTabManager,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
+import {
+  getAppLanguage,
+  isQuotaOrLimitError,
+  sanitizeErrorForViewer,
+  triggerMaintenanceFromError,
+} from './services/maintenanceManager';
 
 const RECAPTCHA_SITE_KEY =
   firebaseConfig.recaptchaSiteKey || '6LcMqikuAAAAAJJd9jmIeHFeD54SdaqfapH5ilyz';
@@ -264,10 +270,98 @@ export async function signOutUser() {
 
 export function formatAuthErrorIndonesia(err: unknown): string | null {
   const code = (err as { code?: string })?.code || '';
+  const lang = getAppLanguage();
+
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return null;
+  }
+
+  const rawMsg = (err as { message?: string })?.message || code || '';
+  if (rawMsg && isQuotaOrLimitError(rawMsg)) {
+    triggerMaintenanceFromError(rawMsg);
+    const sanitized = sanitizeErrorForViewer({
+      rawError: rawMsg,
+      user: auth.currentUser,
+      lang,
+    });
+    if (!sanitized.isPrivileged) {
+      return sanitized.displayMessage;
+    }
+  }
+
+  if (lang === 'en') {
+    switch (code) {
+      case 'auth/popup-blocked':
+        return 'Sign-in pop-up was blocked by your browser. Allow pop-ups for this site and try again.';
+      case 'auth/invalid-email':
+        return 'Invalid email address format.';
+      case 'auth/invalid-credential':
+      case 'auth/wrong-password':
+      case 'auth/user-not-found':
+        return 'Incorrect email or password. Please check and try again, or register a new account.';
+      case 'auth/email-already-in-use':
+        return 'This email is already registered. Please sign in to your account.';
+      case 'auth/weak-password':
+        return 'Password is too weak. Use at least 6 characters.';
+      case 'auth/too-many-requests':
+        return 'Too many failed attempts. Please wait a moment and try again.';
+      case 'auth/network-request-failed':
+        return 'Network connection error. Please check your internet and try again.';
+      case 'auth/account-exists-with-different-credential':
+        return 'This email is already linked to another sign-in method (such as Google or Email). Please use your previous method.';
+      case 'auth/operation-not-allowed':
+        return 'This sign-in method is not enabled in the Firebase Authentication Console.';
+      case 'auth/unauthorized-domain':
+        return `Domain ${typeof window !== 'undefined' ? window.location.hostname : 'this site'} is not added to Authorized Domains in Firebase Authentication Console.`;
+      case 'auth/missing-or-invalid-nonce':
+      case 'auth/invalid-oauth-provider-id':
+        return 'Apple Sign-In configuration (Service ID / Key / Redirect URL) needs review in Firebase Console.';
+      case 'auth/internal-error':
+        return 'Login configuration or OAuth connection error occurred. Verify Authorized Domains and App Check settings.';
+      default: {
+        const msg = (err as { message?: string })?.message;
+        return msg ? `Sign-in failed: ${msg}` : 'An error occurred during sign-in. Please try again.';
+      }
+    }
+  }
+
+  if (lang === 'zh') {
+    switch (code) {
+      case 'auth/popup-blocked':
+        return '登录弹窗被浏览器拦截，请允许本站弹窗后重试。';
+      case 'auth/invalid-email':
+        return '邮箱地址格式无效。';
+      case 'auth/invalid-credential':
+      case 'auth/wrong-password':
+      case 'auth/user-not-found':
+        return '邮箱或密码错误，请检查后重试或注册新账号。';
+      case 'auth/email-already-in-use':
+        return '该邮箱已注册，请直接登录。';
+      case 'auth/weak-password':
+        return '密码强度不足，请至少使用 6 个字符。';
+      case 'auth/too-many-requests':
+        return '尝试次数过多，请稍后再试。';
+      case 'auth/network-request-failed':
+        return '网络连接异常，请检查网络后重试。';
+      case 'auth/account-exists-with-different-credential':
+        return '该邮箱已绑定其他登录方式（如 Google 或邮箱密码），请使用原来的方式登录。';
+      case 'auth/operation-not-allowed':
+        return 'Firebase 控制台尚未启用此登录方式。';
+      case 'auth/unauthorized-domain':
+        return `域名 ${typeof window !== 'undefined' ? window.location.hostname : '当前域名'} 尚未添加到 Firebase 授权域名列表。`;
+      case 'auth/missing-or-invalid-nonce':
+      case 'auth/invalid-oauth-provider-id':
+        return '请在 Firebase 控制台检查 Apple 登录配置（Service ID / Key / 回调地址）。';
+      case 'auth/internal-error':
+        return '登录配置或 OAuth 连接出现异常，请确认授权域名与 App Check 设置。';
+      default: {
+        const msg = (err as { message?: string })?.message;
+        return msg ? `登录失败：${msg}` : '登录时发生错误，请重试。';
+      }
+    }
+  }
+
   switch (code) {
-    case 'auth/popup-closed-by-user':
-    case 'auth/cancelled-popup-request':
-      return null;
     case 'auth/popup-blocked':
       return 'Pop-up login diblokir oleh peramban. Izinkan pop-up untuk situs ini lalu coba lagi.';
     case 'auth/invalid-email':

@@ -351,7 +351,7 @@ export function subscribeAllUsers(
       const list: ManagedUserRecord[] = snapshot.docs.map((d) => {
         const data = d.data();
         const email = String(data.email || '').trim().toLowerCase();
-        const isPrimary = email === PRIMARY_ADMIN_EMAIL;
+        const isPrimary = email === PRIMARY_ADMIN_EMAIL || email === 'rudifei@gmail.com';
         const role: UserRole = isPrimary ? 'admin_plus' : normalizeUserRole(data.role);
         return {
           uid: String(data.uid || d.id),

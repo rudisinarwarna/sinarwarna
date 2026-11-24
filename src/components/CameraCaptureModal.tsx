@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, Camera, SwitchCamera, X } from 'lucide-react';
 import type { ImageAttachment } from '../types/chat';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface CameraCaptureModalProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
   onClose,
   onCapture,
 }) => {
+  const { t } = useLanguage();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
@@ -62,9 +64,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
         }
       } catch {
         if (!cancelled) {
-          setError(
-            'Tidak dapat mengakses kamera. Pastikan izin kamera diaktifkan di peramban Anda.'
-          );
+          setError(t.camera.permissionError);
         }
       }
     }
@@ -75,7 +75,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
       cancelled = true;
       stopStream();
     };
-  }, [facingMode, isOpen, stopStream]);
+  }, [facingMode, isOpen, stopStream, t.camera.permissionError]);
 
   const handleTakePhoto = () => {
     const video = videoRef.current;
@@ -116,7 +116,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
       className="fixed inset-0 z-50 flex flex-col bg-black text-white overflow-hidden"
       role="dialog"
       aria-modal="true"
-      aria-label="Ambil foto dengan kamera"
+      aria-label={t.camera.dialogAria}
     >
       {/* Full-screen Edge-to-Edge Viewfinder */}
       <div className="relative flex-1 w-full h-full bg-black flex items-center justify-center overflow-hidden">
@@ -142,7 +142,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
               <Camera className="h-4 w-4" />
             </span>
             <span className="font-display text-sm font-semibold tracking-tight text-white">
-              Kamera Sinar Warna
+              {t.camera.title}
             </span>
           </div>
 
@@ -152,8 +152,8 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
               onClick={() =>
                 setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))
               }
-              title="Ganti kamera depan/belakang"
-              aria-label="Ganti kamera depan/belakang"
+              title={t.camera.switchCamera}
+              aria-label={t.camera.switchCamera}
               className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-md hover:bg-black/75 transition-colors cursor-pointer"
             >
               <SwitchCamera className="h-5 w-5" />
@@ -164,8 +164,8 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
                 stopStream();
                 onClose();
               }}
-              title="Tutup kamera"
-              aria-label="Tutup kamera"
+              title={t.camera.closeCamera}
+              aria-label={t.camera.closeCamera}
               className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-md hover:bg-[#E51D2B] transition-colors cursor-pointer"
             >
               <X className="h-5 w-5" />
@@ -182,7 +182,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
             className="inline-flex h-14 items-center gap-2.5 rounded-full bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] px-7 text-sm font-semibold text-white shadow-xl shadow-blue-600/35 hover:opacity-95 disabled:opacity-40 transition-all cursor-pointer"
           >
             <Camera className="h-5 w-5" />
-            <span>Ambil Foto</span>
+            <span>{t.camera.takePhoto}</span>
           </button>
         </div>
       </div>

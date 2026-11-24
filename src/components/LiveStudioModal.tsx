@@ -20,6 +20,14 @@ import {
   X,
 } from 'lucide-react';
 import type { CreativeModeId } from '../types/chat';
+import type { AdminLevel } from '../services/adminService';
+import {
+  isQuotaOrLimitError,
+  sanitizeErrorForViewer,
+  triggerMaintenanceFromError,
+  type AppLanguage,
+} from '../services/maintenanceManager';
+import { useLanguage } from '../i18n/LanguageContext';
 import { buildLiveWsUrl } from '../config/api';
 import { SinarLogo } from './SinarLogo';
 
@@ -29,6 +37,8 @@ interface LiveStudioModalProps {
   showTranscriptBox?: boolean;
   activeMode: CreativeModeId;
   user: User | null;
+  adminLevel?: AdminLevel;
+  lang?: AppLanguage;
   onClose: (transcriptLog?: Array<{ role: 'user' | 'model'; text: string }>) => void;
 }
 
@@ -173,8 +183,16 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   showTranscriptBox = true,
   activeMode,
   user,
+  adminLevel = 'none',
+  lang: propLang,
   onClose,
 }) => {
+  const { lang: ctxLang, t } = useLanguage();
+  const activeLang = propLang || ctxLang;
+  const activeLangRef = useRef(activeLang);
+  activeLangRef.current = activeLang;
+  const tRef = useRef(t);
+  tRef.current = t;
   const [status, setStatus] = useState<'connecting' | 'listening' | 'speaking' | 'paused' | 'error'>(
     'connecting'
   );
@@ -221,16 +239,18 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   }, []);
 
   const triggerLocationAndTraffic = useCallback(() => {
+    const l = activeLangRef.current;
+    const tr = tRef.current.liveStudio;
     if (!navigator.geolocation) {
       addMediaBubble({
         type: 'map',
-        title: 'Lokasi & Peta Sinar Warna',
-        description: 'GPS tidak didukung perangkat ini. Menampilkan lokasi pusat Sinar Warna.',
+        title: tr.gpsUnsupportedTitle,
+        description: tr.gpsUnsupportedDesc,
         lat: -6.2088,
         lng: 106.8456,
-        address: 'Jl. Jend. Sudirman & Pusat Sinar Warna, Jakarta',
+        address: l === 'zh' ? '雅加达苏迪曼大街 Sinar Warna 中心' : l === 'en' ? 'Jl. Jend. Sudirman & Sinar Warna Center, Jakarta' : 'Jl. Jend. Sudirman & Pusat Sinar Warna, Jakarta',
         distance: '1.2 km',
-        trafficStatus: 'Lancar Terkendali (Lancar 32 km/h)',
+        trafficStatus: tr.gpsTrafficOk,
       });
       return;
     }
@@ -240,25 +260,25 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         const { latitude, longitude } = pos.coords;
         addMediaBubble({
           type: 'map',
-          title: 'Lokasi Anda & Navigasi Google Maps',
-          description: 'GPS diaktifkan. Jarak ke Sinar Warna & kondisi lalu lintas real-time.',
+          title: l === 'zh' ? '您的位置与 Google Maps 导航' : l === 'en' ? 'Your Location & Google Maps Navigation' : 'Lokasi Anda & Navigasi Google Maps',
+          description: l === 'zh' ? '已开启 GPS。实时距离与路况信息。' : l === 'en' ? 'GPS active. Distance to Sinar Warna & real-time traffic.' : 'GPS diaktifkan. Jarak ke Sinar Warna & kondisi lalu lintas real-time.',
           lat: latitude,
           lng: longitude,
           address: `Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`,
-          distance: '2.4 km dari lokasi Anda',
-          trafficStatus: 'Lancar (Waktu tempuh sekitar 7 menit)',
+          distance: l === 'zh' ? '距您约 2.4 公里' : l === 'en' ? '2.4 km from your location' : '2.4 km dari lokasi Anda',
+          trafficStatus: tr.gpsTrafficOk,
         });
       },
       () => {
         addMediaBubble({
           type: 'map',
-          title: 'Lokasi & Peta Sinar Warna',
-          description: 'Izin lokasi tidak diberikan. Menggunakan lokasi default.',
+          title: tr.gpsUnsupportedTitle,
+          description: l === 'zh' ? '未授予位置权限，正在使用默认位置。' : l === 'en' ? 'Location permission not granted. Using default location.' : 'Izin lokasi tidak diberikan. Menggunakan lokasi default.',
           lat: -6.2088,
           lng: 106.8456,
-          address: 'Pusat Sinar Warna, Jakarta',
+          address: l === 'zh' ? '雅加达 Sinar Warna 中心' : l === 'en' ? 'Sinar Warna Center, Jakarta' : 'Pusat Sinar Warna, Jakarta',
           distance: '1.5 km',
-          trafficStatus: 'Lancar',
+          trafficStatus: tr.gpsTrafficOk,
         });
       },
       { timeout: 8000, enableHighAccuracy: true }
@@ -266,19 +286,23 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
   }, [addMediaBubble]);
 
   const triggerImageBubble = useCallback((query?: string) => {
+    const l = activeLangRef.current;
     addMediaBubble({
       type: 'image',
-      title: query ? `Gambar: ${query}` : 'Visualisasi Produk Sinar Warna',
-      description: 'Dihasilkan secara real-time oleh Gemini',
+      title: query
+        ? `${l === 'zh' ? '图像' : l === 'en' ? 'Image' : 'Gambar'}: ${query}`
+        : l === 'zh' ? 'Sinar Warna 产品可视化' : l === 'en' ? 'Sinar Warna Product Visualization' : 'Visualisasi Produk Sinar Warna',
+      description: l === 'zh' ? '由 Gemini 实时生成' : l === 'en' ? 'Generated in real time by Gemini' : 'Dihasilkan secara real-time oleh Gemini',
       imageUrl: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?auto=format&fit=crop&w=800&q=80',
     });
   }, [addMediaBubble]);
 
   const triggerVideoBubble = useCallback(() => {
+    const l = activeLangRef.current;
     addMediaBubble({
       type: 'video',
-      title: 'Video / Tur Singkat Sinar Warna',
-      description: 'Cuplikan video demonstrasi interaktif',
+      title: l === 'zh' ? 'Sinar Warna 视频 / 短片导览' : l === 'en' ? 'Sinar Warna Video / Short Tour' : 'Video / Tur Singkat Sinar Warna',
+      description: l === 'zh' ? '互动演示视频片段' : l === 'en' ? 'Interactive demonstration clip' : 'Cuplikan video demonstrasi interaktif',
       videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-digital-animation-of-screens-and-lights-31997-large.mp4',
     });
   }, [addMediaBubble]);
@@ -452,8 +476,9 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
       options?: { speakerLabel?: string; completeEntry?: boolean; isOwieBarkTranslation?: boolean }
     ) => {
       if (!chunk) return;
+      const userSpeaker = activeLangRef.current === 'zh' ? '您' : activeLangRef.current === 'en' ? 'You' : 'Anda';
       const speakerLabel =
-        options?.speakerLabel || (role === 'user' ? 'Anda' : getPersonaLabel(voiceRef.current));
+        options?.speakerLabel || (role === 'user' ? userSpeaker : getPersonaLabel(voiceRef.current));
 
       setTranscripts((prev) => {
         const last = prev[prev.length - 1];
@@ -756,7 +781,16 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
             if (msg.error) {
               hadErrorEvent = true;
               serverReadyRef.current = false;
-              setErrorMessage(msg.error);
+              if (isQuotaOrLimitError(msg.error)) {
+                triggerMaintenanceFromError(msg.error);
+              }
+              const sanitized = sanitizeErrorForViewer({
+                rawError: msg.error,
+                user: userRef.current,
+                adminLevel,
+                lang: activeLangRef.current,
+              });
+              setErrorMessage(sanitized.displayMessage);
               setStatus('error');
               return;
             }
@@ -776,7 +810,8 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
               playAudioChunk24k(msg.audio);
             }
             if (msg.inputTranscript) {
-              appendTranscriptChunk('user', msg.inputTranscript, { speakerLabel: 'Anda' });
+              const userSpeaker = activeLangRef.current === 'zh' ? '您' : activeLangRef.current === 'en' ? 'You' : 'Anda';
+              appendTranscriptChunk('user', msg.inputTranscript, { speakerLabel: userSpeaker });
               checkTextForMediaTriggers(msg.inputTranscript);
             }
             if (msg.outputTranscript) {
@@ -800,7 +835,14 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           if (!cancelled) {
             hadErrorEvent = true;
             serverReadyRef.current = false;
-            setErrorMessage('Gagal menyambung ke server Gemini Live.');
+            const rawErr = tRef.current.liveStudio.wsConnectError;
+            const sanitized = sanitizeErrorForViewer({
+              rawError: rawErr,
+              user: userRef.current,
+              adminLevel,
+              lang: activeLangRef.current,
+            });
+            setErrorMessage(sanitized.displayMessage);
             setStatus('error');
           }
         };
@@ -814,9 +856,17 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           }
           if (!hadErrorEvent) {
             const detail = ev.reason ? ` (${ev.reason})` : '';
-            setErrorMessage(
-              `Koneksi AI Live terputus${detail}. Tekan Sambung Ulang untuk melanjutkan.`
-            );
+            const rawMsg = `${tRef.current.liveStudio.wsDisconnectedPrefix}${detail}${tRef.current.liveStudio.wsDisconnectedSuffix}`;
+            if (isQuotaOrLimitError(ev.reason || detail || ev.code)) {
+              triggerMaintenanceFromError(ev.reason || `WebSocket Code: ${ev.code}`);
+            }
+            const sanitized = sanitizeErrorForViewer({
+              rawError: rawMsg,
+              user: userRef.current,
+              adminLevel,
+              lang: activeLangRef.current,
+            });
+            setErrorMessage(sanitized.displayMessage);
             setStatus('error');
           }
         };
@@ -860,9 +910,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         };
       } catch {
         if (!cancelled) {
-          setErrorMessage(
-            'Akses mikrofon ditolak atau tidak tersedia. Aktifkan izin mikrofon lalu coba lagi.'
-          );
+          setErrorMessage(tRef.current.liveStudio.micDeniedError);
           setStatus('error');
         }
       }
@@ -952,7 +1000,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
       } catch {
         if (!cancelled) {
           setIsCameraOn(false);
-          setErrorMessage('Kamera tidak dapat diakses. Periksa izin kamera di peramban Anda.');
+          setErrorMessage(tRef.current.liveStudio.camDeniedError);
         }
       }
     }
@@ -971,7 +1019,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
     voiceRef.current = nextVoice;
     const activeWs = wsRef.current;
     if (activeWs && activeWs.readyState === WebSocket.OPEN) {
-      setHandoffNotice(`Memanggil ${getPersonaLabel(nextVoice)}...`);
+      setHandoffNotice(`${t.liveStudio.callingVoice} ${getPersonaLabel(nextVoice)}...`);
       activeWs.send(JSON.stringify({ switchVoice: nextVoice }));
     } else {
       setConnectTriggerVoice(nextVoice);
@@ -1012,7 +1060,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
       className="fixed inset-0 z-50 flex flex-col bg-[#060914] text-white overflow-hidden"
       role="dialog"
       aria-modal="true"
-      aria-label="Sinar Warna Live"
+      aria-label={t.liveStudio.dialogAria}
     >
       {/* Full-Screen Live Camera Layer when camera is ON */}
       {isCameraOn ? (
@@ -1050,13 +1098,13 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         <div className="flex items-center gap-2.5 min-w-0">
           <SinarLogo size={26} spinning={isCameraOn && status === 'speaking'} />
           <span className="font-display text-sm font-semibold tracking-tight text-white whitespace-nowrap">
-            Sinar Warna Live
+            {t.liveStudio.title}
           </span>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
           <label htmlFor="live-voice-select" className="sr-only">
-            Pilih suara asisten
+            {t.liveStudio.selectVoiceAria}
           </label>
           <div className="inline-flex h-10 items-center gap-1.5 rounded-full border border-blue-400/35 bg-black/45 backdrop-blur-md px-3">
             <Volume2 className="h-3.5 w-3.5 text-[#FF4D5A]" />
@@ -1082,7 +1130,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
           <div className="mb-3 flex max-w-md flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-red-500/40 bg-red-950/75 px-4 py-3 text-xs text-red-200 backdrop-blur-md">
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
               <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
-              <span>{errorMessage}</span>
+              <span className="break-words">{errorMessage}</span>
             </div>
             <button
               type="button"
@@ -1094,7 +1142,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
               className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-3 text-[11px] font-semibold text-white hover:bg-white/25 transition-colors cursor-pointer"
             >
               <RefreshCw className="h-3 w-3" />
-              <span>Sambung Ulang</span>
+              <span>{t.liveStudio.reconnect}</span>
             </button>
           </div>
         )}
@@ -1105,7 +1153,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
             onClick={ensureAudioContextsRunning}
             className="mb-3 rounded-full border border-amber-400/50 bg-amber-950/80 px-4 py-1.5 text-xs font-semibold text-amber-100 backdrop-blur-md hover:bg-amber-900/90 transition-colors cursor-pointer"
           >
-            Ketuk di sini untuk mengaktifkan mikrofon &amp; suara
+            {t.liveStudio.tapToUnblockAudio}
           </button>
         )}
 
@@ -1176,20 +1224,21 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
 
             <div className="space-y-1.5 text-center px-3">
               <p className="font-display text-lg font-semibold text-white sm:text-xl">
-                {status === 'connecting' && `Menghubungkan ${activeVoiceLabel}...`}
-                {status === 'listening' && `Terhubung dengan ${activeVoiceLabel} · Silakan berbicara...`}
+                {status === 'connecting' && `${t.liveStudio.connectingVoice} ${activeVoiceLabel}...`}
+                {status === 'listening' &&
+                  t.liveStudio.listeningWith.replace('{name}', activeVoiceLabel)}
                 {status === 'speaking' &&
                   (voice === 'owie'
                     ? showTranscriptBox
-                      ? 'Owie sedang menggonggong (baca teks di bawah)'
-                      : 'Owie sedang menggonggong'
-                    : `${activeVoiceLabel} sedang berbicara`)}
-                {status === 'paused' && 'Sesi Live dijeda'}
-                {status === 'error' && 'Koneksi terputus'}
+                      ? t.liveStudio.owieBarkingWithText
+                      : t.liveStudio.owieBarking
+                    : `${activeVoiceLabel} ${t.liveStudio.speakingSuffix}`)}
+                {status === 'paused' && t.liveStudio.paused}
+                {status === 'error' && t.liveStudio.disconnected}
               </p>
               {isMuted && (
                 <p className="text-xs text-zinc-400 max-w-xs mx-auto">
-                  Mikrofon dibisukan · Ketuk ikon mikrofon untuk berbicara
+                  {t.liveStudio.micMutedHint}
                 </p>
               )}
             </div>
@@ -1197,17 +1246,19 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         ) : (
           <div className="mb-2 text-center">
             <p className="inline-block rounded-full bg-black/50 px-3.5 py-1.5 text-xs font-medium text-zinc-100 backdrop-blur-md">
-              {status === 'connecting' && `Menghubungkan kamera ke ${activeVoiceLabel}...`}
+              {status === 'connecting' && `${t.liveStudio.connectingCamTo} ${activeVoiceLabel}...`}
               {status === 'listening' &&
-                `Kamera ${facingMode === 'user' ? 'Depan' : 'Belakang'} (${activeVoiceLabel}) · Silakan berbicara`}
+                `${t.liveStudio.camLabelPrefix} ${
+                  facingMode === 'user' ? t.liveStudio.cameraFront : t.liveStudio.cameraBack
+                } (${activeVoiceLabel}) · ${t.liveStudio.speakPrompt}`}
               {status === 'speaking' &&
                 (voice === 'owie'
                   ? showTranscriptBox
-                    ? 'Owie sedang menggonggong (baca teks di bawah)'
-                    : 'Owie sedang menggonggong'
-                  : `${activeVoiceLabel} sedang berbicara...`)}
-              {status === 'paused' && 'Sesi Live dijeda'}
-              {status === 'error' && 'Koneksi terputus'}
+                    ? t.liveStudio.owieBarkingWithText
+                    : t.liveStudio.owieBarking
+                  : `${activeVoiceLabel} ${t.liveStudio.speakingSuffix}...`)}
+              {status === 'paused' && t.liveStudio.paused}
+              {status === 'error' && t.liveStudio.disconnected}
             </p>
           </div>
         )}
@@ -1238,7 +1289,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
                     type="button"
                     onClick={() => setMediaBubbles((prev) => prev.filter((b) => b.id !== bubble.id))}
                     className="rounded-full bg-white/10 p-1 text-zinc-300 hover:bg-white/25 transition-colors cursor-pointer"
-                    aria-label="Tutup bubble"
+                    aria-label={t.liveStudio.closeBubble}
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -1252,13 +1303,13 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
                   <div className="rounded-xl border border-white/25 bg-black/60 p-3 space-y-2 backdrop-blur-md">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-zinc-400 flex items-center gap-1">
-                        <Navigation className="h-3 w-3 text-blue-400" /> Jarak:
+                        <Navigation className="h-3 w-3 text-blue-400" /> {t.liveStudio.distanceLabel}
                       </span>
                       <span className="font-semibold text-white">{bubble.distance}</span>
                     </div>
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-zinc-400 flex items-center gap-1">
-                        <Car className="h-3 w-3 text-emerald-400" /> Lalulintas:
+                        <Car className="h-3 w-3 text-emerald-400" /> {t.liveStudio.trafficLabel}
                       </span>
                       <span className="font-semibold text-emerald-300">{bubble.trafficStatus}</span>
                     </div>
@@ -1312,7 +1363,7 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
                   }`}
                 >
                   {item.speakerLabel}
-                  {item.isOwieBarkTranslation ? ' (Arti Gonggongan)' : ''}:
+                  {item.isOwieBarkTranslation ? ` ${t.liveStudio.owieBarkTranslationTag}` : ''}:
                 </span>
                 <span>{item.text}</span>
               </p>
@@ -1327,8 +1378,8 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         <button
           type="button"
           onClick={() => setIsCameraOn((prev) => !prev)}
-          title={isCameraOn ? 'Matikan kamera langsung' : 'Nyalakan kamera langsung'}
-          aria-label={isCameraOn ? 'Matikan kamera langsung' : 'Nyalakan kamera langsung'}
+          title={isCameraOn ? t.liveStudio.camOffTooltip : t.liveStudio.camOnTooltip}
+          aria-label={isCameraOn ? t.liveStudio.camOffTooltip : t.liveStudio.camOnTooltip}
           className={`inline-flex h-14 w-14 items-center justify-center rounded-full border backdrop-blur-md transition-colors cursor-pointer ${
             isCameraOn
               ? 'border-blue-400 bg-[#0A36FF] text-white shadow-lg shadow-blue-600/40'
@@ -1346,19 +1397,19 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
             }
             title={
               facingMode === 'environment'
-                ? 'Pindah ke kamera depan (selfie)'
-                : 'Pindah ke kamera belakang'
+                ? t.liveStudio.switchToFrontTooltip
+                : t.liveStudio.switchToBackTooltip
             }
             aria-label={
               facingMode === 'environment'
-                ? 'Pindah ke kamera depan (selfie)'
-                : 'Pindah ke kamera belakang'
+                ? t.liveStudio.switchToFrontTooltip
+                : t.liveStudio.switchToBackTooltip
             }
             className="inline-flex h-14 w-14 flex-col items-center justify-center gap-0.5 rounded-full border border-white/25 bg-black/50 text-white backdrop-blur-md hover:bg-white/20 active:scale-95 transition-all cursor-pointer"
           >
             <SwitchCamera className="h-5 w-5" />
             <span className="text-[9px] font-semibold leading-none tracking-tight text-zinc-200">
-              {facingMode === 'user' ? 'Depan' : 'Belakang'}
+              {facingMode === 'user' ? t.liveStudio.frontShort : t.liveStudio.backShort}
             </span>
           </button>
         )}
@@ -1366,8 +1417,8 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         <button
           type="button"
           onClick={() => setIsMuted((prev) => !prev)}
-          title={isMuted ? 'Aktifkan mikrofon' : 'Bisukan mikrofon'}
-          aria-label={isMuted ? 'Aktifkan mikrofon' : 'Bisukan mikrofon'}
+          title={isMuted ? t.liveStudio.unmuteMicTooltip : t.liveStudio.muteMicTooltip}
+          aria-label={isMuted ? t.liveStudio.unmuteMicTooltip : t.liveStudio.muteMicTooltip}
           className={`inline-flex h-14 w-14 items-center justify-center rounded-full border backdrop-blur-md transition-colors cursor-pointer ${
             isMuted
               ? 'border-[#E51D2B] bg-[#E51D2B]/40 text-red-100'
@@ -1380,8 +1431,8 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         <button
           type="button"
           onClick={handleTogglePause}
-          title={isPaused ? 'Lanjutkan Live' : 'Jeda Live'}
-          aria-label={isPaused ? 'Lanjutkan Live' : 'Jeda Live'}
+          title={isPaused ? t.liveStudio.resumeLiveTooltip : t.liveStudio.pauseLiveTooltip}
+          aria-label={isPaused ? t.liveStudio.resumeLiveTooltip : t.liveStudio.pauseLiveTooltip}
           className={`inline-flex h-14 w-14 items-center justify-center rounded-full border backdrop-blur-md transition-colors cursor-pointer ${
             isPaused
               ? 'border-blue-400 bg-[#0A36FF]/45 text-blue-100'
@@ -1394,8 +1445,8 @@ export const LiveStudioModal: React.FC<LiveStudioModalProps> = ({
         <button
           type="button"
           onClick={handleEndCall}
-          title="Akhiri Sinar Warna Live"
-          aria-label="Akhiri Sinar Warna Live"
+          title={t.liveStudio.endCallTooltip}
+          aria-label={t.liveStudio.endCallTooltip}
           className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-[#E51D2B] text-white shadow-lg shadow-red-600/45 hover:bg-red-600 transition-colors cursor-pointer"
         >
           <PhoneOff className="h-5 w-5" />

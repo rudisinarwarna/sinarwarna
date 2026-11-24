@@ -70,6 +70,21 @@
   animation: sinar-ring 1.6s cubic-bezier(0.16, 1, 0.3, 1) 0.8s infinite;
 }
 
+@keyframes marquee {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee 32s linear infinite;
+}
+
 /* Temporary Ko Awen 25th Anniversary & Birthday celebration styles */
 .font-anniversary {
   font-family: "Cinzel", "Playfair Display", Georgia, serif;

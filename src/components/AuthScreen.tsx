@@ -19,6 +19,7 @@ import {
   signInWithGoogle,
   signUpWithEmail,
 } from '../firebase';
+import { useLanguage } from '../i18n/LanguageContext';
 
 interface AuthScreenProps {
   isDark: boolean;
@@ -40,6 +41,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [logoFailed, setLogoFailed] = useState(false);
+  const { t } = useLanguage();
 
   const isBusy = loadingMethod !== null;
 
@@ -57,11 +59,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
 
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
-      setErrorMessage('Masukkan alamat email Anda.');
+      setErrorMessage(t.auth.errEnterEmail);
       return;
     }
     if (!password || password.length < 6) {
-      setErrorMessage('Kata sandi minimal 6 karakter.');
+      setErrorMessage(t.auth.errPasswordLength);
       return;
     }
 
@@ -87,16 +89,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
 
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
-      setErrorMessage('Masukkan email Anda terlebih dahulu untuk mengatur ulang kata sandi.');
+      setErrorMessage(t.auth.errResetNeedEmail);
       return;
     }
 
     setLoadingMethod('reset');
     try {
       await resetPasswordWithEmail(trimmedEmail);
-      setInfoMessage(
-        'Tautan atur ulang kata sandi telah dikirim ke email Anda. Periksa kotak masuk atau folder spam.'
-      );
+      setInfoMessage(t.auth.infoResetSent);
     } catch (err) {
       const formatted = formatAuthErrorIndonesia(err);
       if (formatted) setErrorMessage(formatted);
@@ -113,7 +113,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
     try {
       const res = await signInWithGoogle();
       if (!res) {
-        setInfoMessage('Mengalihkan ke halaman masuk Google...');
+        setInfoMessage(t.auth.infoRedirectGoogle);
       }
     } catch (err) {
       const formatted = formatAuthErrorIndonesia(err);
@@ -131,7 +131,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
     try {
       const res = await signInWithApple();
       if (!res) {
-        setInfoMessage('Mengalihkan ke halaman masuk Apple...');
+        setInfoMessage(t.auth.infoRedirectApple);
       }
     } catch (err) {
       const formatted = formatAuthErrorIndonesia(err);
@@ -155,7 +155,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
       }`}
       role={onClose ? 'dialog' : undefined}
       aria-modal={onClose ? 'true' : undefined}
-      aria-label="Masuk atau daftar akun Sinar Warna"
+      aria-label={t.auth.dialogAria}
     >
       {!onClose && (
         <>
@@ -166,8 +166,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
           <button
             type="button"
             onClick={onToggleTheme}
-            title={isDark ? 'Ganti ke tema terang' : 'Ganti ke tema gelap'}
-            aria-label={isDark ? 'Ganti ke tema terang' : 'Ganti ke tema gelap'}
+            title={isDark ? t.header.switchToLight : t.header.switchToDark}
+            aria-label={isDark ? t.header.switchToLight : t.header.switchToDark}
             className="fixed right-4 top-4 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full border border-zinc-200 bg-white/80 text-zinc-700 backdrop-blur-md hover:bg-zinc-100 dark:border-[#242C44] dark:bg-[#14192B]/80 dark:text-zinc-300 dark:hover:bg-white/10 transition-colors cursor-pointer"
           >
             {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -195,13 +195,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
             </div>
 
             <h1 className="font-display text-2xl font-bold tracking-tight text-zinc-900 dark:text-white sm:text-[1.75rem]">
-              Selamat datang di{' '}
+              {t.auth.welcomeTitlePrefix}{' '}
               <span className="bg-gradient-to-r from-[#E51D2B] via-[#6366F1] to-[#0A36FF] bg-clip-text text-transparent dark:from-[#FF4D5A] dark:via-[#818CF8] dark:to-[#4F8BFF]">
                 Sinar Warna
               </span>
             </h1>
             <p className="mt-1.5 text-sm text-zinc-600 dark:text-zinc-400">
-              Silakan masuk atau daftar akun untuk mulai konsultasi cat & warna.
+              {t.auth.welcomeSubtitle}
             </p>
           </div>
         )}
@@ -214,8 +214,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
             <button
               type="button"
               onClick={onClose}
-              title="Tutup"
-              aria-label="Tutup jendela login"
+              title={t.auth.close}
+              aria-label={t.auth.close}
               className="absolute right-3.5 top-3.5 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white transition-colors cursor-pointer"
             >
               <X className="h-4 w-4" />
@@ -239,20 +239,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
                   </span>
                 )}
                 <h2 className="font-display text-lg font-bold tracking-tight text-zinc-900 dark:text-white">
-                  Masuk ke{' '}
+                  {t.auth.modalTitlePrefix}{' '}
                   <span className="bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] bg-clip-text text-transparent dark:from-[#FF4D5A] dark:to-[#4F8BFF]">
                     Sinar Warna
                   </span>
                 </h2>
                 <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                  Simpan riwayat percakapan Anda di cloud (opsional).
+                  {t.auth.modalSubtitle}
                 </p>
               </div>
             )}
             {/* Tab Switch: Masuk / Daftar */}
             <div
               role="tablist"
-              aria-label="Pilih masuk atau daftar"
+              aria-label={t.auth.dialogAria}
               className="grid grid-cols-2 rounded-2xl bg-zinc-100 p-1 dark:bg-[#0B0F1A]"
             >
               <button
@@ -266,7 +266,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
                     : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
                 }`}
               >
-                Masuk
+                {t.auth.tabLogin}
               </button>
               <button
                 type="button"
@@ -279,7 +279,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
                     : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
                 }`}
               >
-                Daftar Akun
+                {t.auth.tabRegister}
               </button>
             </div>
 
@@ -311,7 +311,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
                     htmlFor="auth-name"
                     className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
                   >
-                    Nama Lengkap
+                    {t.auth.fullNameLabel}
                   </label>
                   <div className="relative">
                     <UserIcon className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-zinc-400" />
@@ -321,7 +321,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
                       autoComplete="name"
                       value={displayName}
                       onChange={(e) => setDisplayName(e.target.value)}
-                      placeholder="Contoh: Budi Santoso"
+                      placeholder={t.auth.fullNamePlaceholder}
                       className="h-11 w-full rounded-xl border border-zinc-200 bg-zinc-50/70 pl-10 pr-3.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-[#0A36FF] focus:bg-white focus:outline-none dark:border-[#293456] dark:bg-[#0B0F1A] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-blue-400"
                     />
                   </div>
@@ -333,7 +333,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
                   htmlFor="auth-email"
                   className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
                 >
-                  Alamat Email
+                  {t.auth.emailLabel}
                 </label>
                 <div className="relative">
                   <Mail className="pointer-events-none absolute left-3.5 top-3.5 h-4 w-4 text-zinc-400" />
@@ -344,7 +344,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
                     autoComplete="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="nama@email.com"
+                    placeholder={t.auth.emailPlaceholder}
                     className="h-11 w-full rounded-xl border border-zinc-200 bg-zinc-50/70 pl-10 pr-3.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-[#0A36FF] focus:bg-white focus:outline-none dark:border-[#293456] dark:bg-[#0B0F1A] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-blue-400"
                   />
                 </div>
@@ -356,7 +356,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
                     htmlFor="auth-password"
                     className="block text-xs font-medium text-zinc-700 dark:text-zinc-300"
                   >
-                    Kata Sandi
+                    {t.auth.passwordLabel}
                   </label>
                   {tab === 'login' && (
                     <button
@@ -365,7 +365,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
                       onClick={() => void handlePasswordReset()}
                       className="text-[11px] font-medium text-[#0A36FF] hover:underline dark:text-blue-400 cursor-pointer"
                     >
-                      Lupa kata sandi?
+                      {t.auth.forgotPassword}
                     </button>
                   )}
                 </div>
@@ -379,13 +379,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
                     autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Minimal 6 karakter"
+                    placeholder={t.auth.passwordPlaceholder}
                     className="h-11 w-full rounded-xl border border-zinc-200 bg-zinc-50/70 pl-10 pr-10 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-[#0A36FF] focus:bg-white focus:outline-none dark:border-[#293456] dark:bg-[#0B0F1A] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-blue-400"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((prev) => !prev)}
-                    aria-label={showPassword ? 'Sembunyikan kata sandi' : 'Lihat kata sandi'}
+                    aria-label={showPassword ? t.auth.hidePassword : t.auth.showPassword}
                     className="absolute right-2 top-1.5 inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -400,11 +400,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
               >
                 {loadingMethod === 'email'
                   ? tab === 'login'
-                    ? 'Memproses masuk...'
-                    : 'Mendaftarkan akun...'
+                    ? t.auth.processingLogin
+                    : t.auth.processingRegister
                   : tab === 'login'
-                  ? 'Masuk dengan Email'
-                  : 'Daftar Akun Baru'}
+                  ? t.auth.loginWithEmail
+                  : t.auth.registerAccount}
               </button>
             </form>
 
@@ -412,7 +412,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
             <div className="relative flex items-center py-0.5">
               <div className="flex-grow border-t border-zinc-200 dark:border-[#242C44]" />
               <span className="mx-3 shrink-0 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-                atau lanjutkan dengan
+                {t.auth.orContinueWith}
               </span>
               <div className="flex-grow border-t border-zinc-200 dark:border-[#242C44]" />
             </div>
@@ -443,7 +443,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
                     d="M21.1 12.2c0-.6-.1-1.1-.2-1.6H12v3.9h5.4c-.3 1.4-1.1 2.5-2.1 3.1l3 2.5c1.8-1.6 2.8-4.1 2.8-7.9z"
                   />
                 </svg>
-                <span>{loadingMethod === 'google' ? 'Menghubungkan...' : 'Google'}</span>
+                <span>{loadingMethod === 'google' ? t.auth.connecting : 'Google'}</span>
               </button>
 
               <button
@@ -455,7 +455,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
                 <svg className="h-4 w-4 shrink-0 fill-current" viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M16.365 1.43c0 1.14-.493 2.27-1.177 3.08-.744.9-1.99 1.57-2.987 1.57-.12 0-.23-.02-.3-.03-.01-.06-.04-.22-.04-.39 0-1.15.572-2.27 1.206-2.98.804-.94 2.142-1.64 3.248-1.68.03.13.05.28.05.43zm4.565 15.71c-.03.07-.463 1.58-1.518 3.12-.945 1.34-1.94 2.71-3.43 2.71-1.517 0-1.9-.88-3.63-.88-1.698 0-2.302.91-3.67.91-1.377 0-2.332-1.26-3.428-2.8-1.287-1.82-2.323-4.63-2.323-7.28 0-4.28 2.797-6.55 5.552-6.55 1.448 0 2.675.95 3.6.95.865 0 2.222-1.01 3.902-1.01.613 0 2.886.06 4.374 2.19-.13.09-2.383 1.37-2.383 4.19 0 3.26 2.854 4.42 2.955 4.45z" />
                 </svg>
-                <span>{loadingMethod === 'apple' ? 'Menghubungkan...' : 'Apple'}</span>
+                <span>{loadingMethod === 'apple' ? t.auth.connecting : 'Apple'}</span>
               </button>
             </div>
           </div>

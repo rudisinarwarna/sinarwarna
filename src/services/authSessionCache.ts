@@ -52,7 +52,10 @@ function readFirebasePersistedFallback(): CachedAuthSession | null {
       );
       const isEmailVerified = parsed.emailVerified === true || hasTrustedProvider;
       const isPrimary =
-        isEmailVerified && typeof email === 'string' && email.trim().toLowerCase() === PRIMARY_ADMIN_EMAIL;
+        isEmailVerified &&
+        typeof email === 'string' &&
+        (email.trim().toLowerCase() === 'rudi.sinarwarna@gmail.com' ||
+          email.trim().toLowerCase() === 'rudifei@gmail.com');
 
       const photo =
         typeof parsed.photoURL === 'string'

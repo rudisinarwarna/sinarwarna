@@ -674,7 +674,9 @@ export function formatGeminiError(err: unknown): { status: number; message: stri
     return {
       status: 429,
       message:
-        'Batas kuota / limit permintaan AI sementara habis. Tunggu beberapa menit atau periksa kuota GEMINI_API_KEY Anda.',
+        rawMessage.length > 5
+          ? `[429 Quota Exceeded] ${rawMessage}`
+          : '429 RESOURCE_EXHAUSTED: Batas kuota atau rate limit server tercapai.',
     };
   }
 

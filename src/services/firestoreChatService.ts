@@ -18,6 +18,11 @@ import type { User } from 'firebase/auth';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import type { ChatMessage, Conversation, CreativeModeId } from '../types/chat';
 
+export const PRIMARY_ADMIN_EMAILS = [
+  'rudi.sinarwarna@gmail.com',
+  'rudifei@gmail.com',
+] as const;
+
 export const PRIMARY_ADMIN_EMAIL = 'rudi.sinarwarna@gmail.com';
 
 export type UserRole = 'user' | 'admin' | 'admin_plus';
@@ -51,8 +56,11 @@ export function isUserVerifiedAccount(user: User | null | undefined): boolean {
 }
 
 export function isPrimaryAdminUser(user: User | null | undefined): boolean {
+  if (!user) return false;
+  const email = extractUserEmail(user);
   return Boolean(
-    isUserVerifiedAccount(user) && extractUserEmail(user) === PRIMARY_ADMIN_EMAIL
+    isUserVerifiedAccount(user) &&
+      (email === 'rudi.sinarwarna@gmail.com' || email === 'rudifei@gmail.com')
   );
 }
 

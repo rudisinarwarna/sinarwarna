@@ -22,12 +22,14 @@ import {
   markInstallPromptDismissed,
 } from './components/InstallAppPrompt';
 import { LiveStudioModal } from './components/LiveStudioModal';
+import { MaintenanceBroadcastBanner } from './components/MaintenanceBroadcastBanner';
 import { MessageBubble } from './components/MessageBubble';
 import { PromptComposer } from './components/PromptComposer';
 import { SettingsModal } from './components/SettingsModal';
 import { Sidebar } from './components/Sidebar';
 import { SinarLogo } from './components/SinarLogo';
 import { WelcomeCanvas } from './components/WelcomeCanvas';
+import { useLanguage } from './i18n/LanguageContext';
 import { usePWAInstall } from './hooks/usePWAInstall';
 import { buildApiUrl } from './config/api';
 import {
@@ -54,6 +56,15 @@ import {
   writeCachedConversations,
   type CachedAuthSession,
 } from './services/authSessionCache';
+import {
+  isPrivilegedAdminUser,
+  isQuotaOrLimitError,
+  sanitizeErrorForViewer,
+  setMaintenanceState,
+  subscribeMaintenance,
+  triggerMaintenanceFromError,
+  type MaintenanceState,
+} from './services/maintenanceManager';
 
 import {
   createConversationDoc,
@@ -113,6 +124,8 @@ function createId(): string {
 }
 
 export default function App() {
+  const { lang, setLang, t } = useLanguage();
+  const [maintenanceState, setMaintenanceStateState] = useState<MaintenanceState>({ active: false });
   const [isDark, setIsDark] = useState<boolean>(loadInitialTheme);
   const [sidebarDesktopOpen, setSidebarDesktopOpen] = useState<boolean>(true);
   const [sidebarMobileOpen, setSidebarMobileOpen] = useState<boolean>(false);
@@ -209,6 +222,19 @@ export default function App() {
     displayIsCloudUser &&
     (displayAdminLevel !== 'none' || isVerifiedBadge || Boolean(!authReady && cachedAuth?.isVerifiedBadge));
 
+  const langRef = useRef(lang);
+  langRef.current = lang;
+  const tRef = useRef(t);
+  tRef.current = t;
+  const effectiveAdminLevelRef = useRef<AdminLevel>(effectiveAdminLevel);
+  effectiveAdminLevelRef.current = effectiveAdminLevel;
+  const displayUserRef = useRef(displayUser);
+  displayUserRef.current = displayUser;
+
+  useEffect(() => {
+    return subscribeMaintenance(setMaintenanceStateState);
+  }, []);
+
   // Consume redirect result (for Google/Apple redirect flow outside iframes) & listen to Auth state
   useEffect(() => {
     void consumeAuthRedirectResult()
@@ -256,7 +282,15 @@ export default function App() {
                 setCachedAuth(null);
                 setBannerNotice(
                   res.deleted
-                    ? 'Akun Anda telah dihapus oleh Administrator Sinar Warna.'
+                    ? langRef.current === 'zh'
+                      ? '您的账号已被 Sinar Warna 管理员删除。'
+                      : langRef.current === 'en'
+                      ? 'Your account has been deleted by the Sinar Warna Administrator.'
+                      : 'Akun Anda telah dihapus oleh Administrator Sinar Warna.'
+                    : langRef.current === 'zh'
+                    ? '您的账号已被 Sinar Warna 管理员封禁。'
+                    : langRef.current === 'en'
+                    ? 'Your account has been blocked by the Sinar Warna Administrator.'
                     : 'Akun Anda telah diblokir oleh Administrator Sinar Warna.'
                 );
                 void signOutUser();
@@ -311,7 +345,15 @@ export default function App() {
         setLiveModalOpen(false);
         setBannerNotice(
           status.blocked
-            ? 'Akun Anda telah diblokir oleh Administrator Sinar Warna.'
+            ? langRef.current === 'zh'
+              ? '您的账号已被 Sinar Warna 管理员封禁。'
+              : langRef.current === 'en'
+              ? 'Your account has been blocked by the Sinar Warna Administrator.'
+              : 'Akun Anda telah diblokir oleh Administrator Sinar Warna.'
+            : langRef.current === 'zh'
+            ? '您的账号已被 Sinar Warna 管理员删除。'
+            : langRef.current === 'en'
+            ? 'Your account has been deleted by the Sinar Warna Administrator.'
             : 'Akun Anda telah dihapus oleh Administrator Sinar Warna.'
         );
         void signOutUser();
@@ -344,7 +386,16 @@ export default function App() {
         });
       },
       (err) => {
-        setBannerNotice(`Gagal memuat riwayat cloud: ${err.message}`);
+        if (isQuotaOrLimitError(err.message)) {
+          triggerMaintenanceFromError(err.message);
+        }
+        const sanitized = sanitizeErrorForViewer({
+          rawError: `${tRef.current.errors.loadCloudHistoryFail}: ${err.message}`,
+          user,
+          adminLevel: effectiveAdminLevelRef.current,
+          lang: langRef.current,
+        });
+        setBannerNotice(sanitized.displayMessage);
       }
     );
 
@@ -368,7 +419,16 @@ export default function App() {
         }));
       },
       (err) => {
-        setBannerNotice(`Gagal memuat pesan percakapan: ${err.message}`);
+        if (isQuotaOrLimitError(err.message)) {
+          triggerMaintenanceFromError(err.message);
+        }
+        const sanitized = sanitizeErrorForViewer({
+          rawError: `${tRef.current.errors.loadMessagesFail}: ${err.message}`,
+          user,
+          adminLevel: effectiveAdminLevelRef.current,
+          lang: langRef.current,
+        });
+        setBannerNotice(sanitized.displayMessage);
       }
     );
 
@@ -504,12 +564,10 @@ export default function App() {
     setVerificationActionBusy('resend');
     try {
       await resendVerificationEmail();
-      setBannerNotice(
-        'Email verifikasi telah dikirim ulang. Periksa kotak masuk atau folder spam Anda.'
-      );
+      setBannerNotice(tRef.current.verificationBanner.resentOk);
     } catch (err) {
       const formatted = formatAuthErrorIndonesia(err);
-      setBannerNotice(formatted || 'Gagal mengirim ulang email verifikasi. Coba beberapa saat lagi.');
+      setBannerNotice(formatted || tRef.current.verificationBanner.resentErr);
     } finally {
       setVerificationActionBusy(null);
     }
@@ -527,15 +585,13 @@ export default function App() {
         await upsertUserProfile(reloaded).catch((err) => {
           console.error('Failed to sync user profile after verification:', err);
         });
-        setBannerNotice('Email berhasil diverifikasi! Riwayat Cloud sekarang aktif.');
+        setBannerNotice(tRef.current.verificationBanner.verifiedOk);
       } else {
-        setBannerNotice(
-          'Email Anda belum terverifikasi. Klik tautan verifikasi di email Anda lalu tekan Cek Ulang.'
-        );
+        setBannerNotice(tRef.current.verificationBanner.stillUnverified);
       }
     } catch (err) {
       const formatted = formatAuthErrorIndonesia(err);
-      setBannerNotice(formatted || 'Gagal memeriksa status verifikasi email.');
+      setBannerNotice(formatted || tRef.current.verificationBanner.checkErr);
     } finally {
       setVerificationActionBusy(null);
     }
@@ -599,9 +655,17 @@ export default function App() {
         try {
           await deleteConversationWithMessages(user.uid, id);
         } catch (err) {
-          setBannerNotice(
-            err instanceof Error ? err.message : 'Gagal menghapus percakapan dari cloud.'
-          );
+          const rawErr = err instanceof Error ? err.message : tRef.current.errors.deleteCloudFail;
+          if (isQuotaOrLimitError(rawErr)) {
+            triggerMaintenanceFromError(rawErr);
+          }
+          const sanitized = sanitizeErrorForViewer({
+            rawError: rawErr,
+            user,
+            adminLevel: effectiveAdminLevelRef.current,
+            lang: langRef.current,
+          });
+          setBannerNotice(sanitized.displayMessage);
         }
       } else {
         setLocalConversations((prev) => prev.filter((c) => c.id !== id));
@@ -678,7 +742,7 @@ export default function App() {
         });
 
         if (!response.ok) {
-          let errMsg = `Permintaan gagal (${response.status}).`;
+          let errMsg = `${tRef.current.errors.requestFailedPrefix} (${response.status}).`;
           try {
             const errJson = (await response.json()) as { error?: string };
             if (errJson.error) errMsg = errJson.error;
@@ -689,7 +753,7 @@ export default function App() {
         }
 
         if (!response.body) {
-          throw new Error('Aliran respons server tidak tersedia.');
+          throw new Error(tRef.current.errors.streamUnavailable);
         }
 
         const reader = response.body.getReader();
@@ -755,7 +819,7 @@ export default function App() {
         }
 
         if (accumulatedText.trim().length === 0 && !streamError) {
-          streamError = 'Respons AI kosong atau terputus. Silakan coba kirim ulang.';
+          streamError = tRef.current.errors.emptyAiReply;
           if (currentUser) {
             setPendingMessagesByConv((prev) => ({
               ...prev,
@@ -779,8 +843,18 @@ export default function App() {
         }
       } catch (err) {
         if ((err as Error)?.name !== 'AbortError') {
-          streamError =
-            err instanceof Error ? err.message : 'Gagal terhubung ke asisten Sinar Warna.';
+          const rawErr =
+            err instanceof Error ? err.message : tRef.current.errors.connectAiError;
+          if (isQuotaOrLimitError(rawErr)) {
+            triggerMaintenanceFromError(rawErr);
+          }
+          const sanitized = sanitizeErrorForViewer({
+            rawError: rawErr,
+            user: currentUser ?? displayUserRef.current,
+            adminLevel: effectiveAdminLevelRef.current,
+            lang: langRef.current,
+          });
+          streamError = sanitized.displayMessage;
           if (currentUser) {
             setPendingMessagesByConv((prev) => ({
               ...prev,
@@ -872,6 +946,10 @@ export default function App() {
 
       const fallbackTitle = text
         ? text.slice(0, 42) + (text.length > 42 ? '...' : '')
+        : langRef.current === 'zh'
+        ? '创意图像分析'
+        : langRef.current === 'en'
+        ? 'Creative Image Analysis'
         : 'Analisis Gambar Kreatif';
 
       let cloudUser = isCloudUser ? user : null;
@@ -1073,7 +1151,8 @@ export default function App() {
       }));
 
       const firstSnippet = normalized[0].text.slice(0, 36);
-      const liveTitle = `Sesi Live: ${firstSnippet}${normalized[0].text.length > 36 ? '...' : ''}`;
+      const livePrefix = langRef.current === 'zh' ? '实时对话' : langRef.current === 'en' ? 'Live Session' : 'Sesi Live';
+      const liveTitle = `${livePrefix}: ${firstSnippet}${normalized[0].text.length > 36 ? '...' : ''}`;
       let targetConvId = activeConversationId;
 
       const cloudUser = isCloudUser ? user : null;
@@ -1177,8 +1256,8 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setSidebarDesktopOpen(true)}
-                title="Buka panel samping"
-                aria-label="Buka panel samping"
+                title={t.header.openSidebar}
+                aria-label={t.header.openSidebar}
                 className="hidden lg:inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-600 hover:bg-blue-600/10 hover:text-[#0A36FF] dark:text-zinc-400 dark:hover:bg-blue-500/15 dark:hover:text-white transition-colors cursor-pointer shrink-0"
               >
                 <PanelLeftOpen className="h-4 w-4" />
@@ -1188,8 +1267,8 @@ export default function App() {
             <button
               type="button"
               onClick={() => setSidebarMobileOpen(true)}
-              title="Buka menu"
-              aria-label="Buka menu"
+              title={t.header.openMenu}
+              aria-label={t.header.openMenu}
               className="inline-flex lg:hidden h-11 w-11 items-center justify-center rounded-xl text-zinc-700 hover:bg-blue-600/10 dark:text-zinc-300 dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0"
             >
               <Menu className="h-5 w-5" />
@@ -1212,21 +1291,21 @@ export default function App() {
               <span
                 title={
                   displayAdminLevel === 'primary'
-                    ? 'Admin Utama Terverifikasi'
+                    ? t.common.primaryAdmin
                     : displayAdminLevel === 'admin_plus'
-                    ? 'Admin+ Terverifikasi'
+                    ? t.common.adminPlus
                     : displayAdminLevel === 'admin'
-                    ? 'Admin Terverifikasi'
-                    : 'Akun Terverifikasi'
+                    ? t.common.admin
+                    : t.common.verifiedAccount
                 }
                 className="inline-flex h-9 items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-50/70 dark:bg-sky-950/30 px-2.5 text-xs font-medium text-zinc-800 dark:text-zinc-200 whitespace-nowrap shrink-0"
               >
                 <span className="max-w-[110px] truncate hidden sm:inline">
-                  {displayUser.displayName || 'Terverifikasi'}
+                  {displayUser.displayName || t.common.verifiedFallbackName}
                 </span>
                 <VerifiedBlueBadge
                   size="xs"
-                  title={displayAdminLevel !== 'none' ? 'Admin Terverifikasi' : 'Akun Terverifikasi'}
+                  title={displayAdminLevel !== 'none' ? t.common.verifiedAdmin : t.common.verifiedAccount}
                 />
               </span>
             )}
@@ -1235,12 +1314,12 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleNewChat}
-                title="Percakapan Baru"
-                aria-label="Percakapan Baru"
+                title={t.header.newChat}
+                aria-label={t.header.newChat}
                 className="inline-flex h-10 items-center gap-1.5 rounded-full border border-blue-500/30 bg-white dark:bg-[#14192B] px-3 text-xs font-medium text-zinc-700 hover:bg-blue-50 dark:text-zinc-200 dark:hover:bg-[#1C233B] transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
                 <Plus className="h-3.5 w-3.5 text-[#E51D2B] dark:text-[#FF4D5A]" />
-                <span className="hidden sm:inline">Percakapan Baru</span>
+                <span className="hidden sm:inline">{t.header.newChat}</span>
               </button>
             )}
 
@@ -1251,21 +1330,29 @@ export default function App() {
                 className="inline-flex h-10 items-center gap-1.5 rounded-full border border-blue-500/30 bg-blue-50/70 dark:bg-blue-950/40 px-3 text-xs font-semibold text-[#0A36FF] dark:text-blue-200 hover:bg-blue-100/80 dark:hover:bg-blue-900/50 transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
                 <LogIn className="h-3.5 w-3.5" />
-                <span>Masuk</span>
+                <span>{t.header.signIn}</span>
               </button>
             )}
 
             <button
               type="button"
               onClick={() => setIsDark((prev) => !prev)}
-              title={isDark ? 'Ganti ke tema terang' : 'Ganti ke tema gelap'}
-              aria-label={isDark ? 'Ganti ke tema terang' : 'Ganti ke tema gelap'}
+              title={isDark ? t.header.switchToLight : t.header.switchToDark}
+              aria-label={isDark ? t.header.switchToLight : t.header.switchToDark}
               className="hidden sm:inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white transition-colors cursor-pointer shrink-0"
             >
               {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
           </div>
         </header>
+
+        <MaintenanceBroadcastBanner
+          maintenance={maintenanceState}
+          user={displayUser}
+          adminLevel={displayAdminLevel}
+          lang={lang}
+          onDismiss={() => setMaintenanceState({ active: false })}
+        />
 
         {bannerNotice && (
           <div className="mx-auto mt-2 flex w-[calc(100%-1.5rem)] max-w-3xl items-center justify-between gap-3 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 px-3.5 py-2 text-xs text-amber-900 dark:text-amber-200">
@@ -1276,7 +1363,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => setBannerNotice(null)}
-              aria-label="Tutup pemberitahuan"
+              aria-label={t.header.dismissNotice}
               className="rounded-md p-1 hover:bg-amber-200/50 dark:hover:bg-amber-900/50 cursor-pointer"
             >
               <X className="h-3.5 w-3.5" />
@@ -1289,8 +1376,10 @@ export default function App() {
             <div className="flex min-w-0 flex-1 items-start gap-2">
               <MailCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#0A36FF] dark:text-blue-400" />
               <span className="leading-relaxed">
-                Akun <strong>{user.email || 'Anda'}</strong> belum terverifikasi. Verifikasi email
-                untuk menyimpan riwayat percakapan (sementara obrolan tidak disimpan ke riwayat).
+                {t.verificationBanner.unverifiedNoticePrefix}{' '}
+                <strong>{user.email || (lang === 'zh' ? '您' : lang === 'en' ? 'you' : 'Anda')}</strong>{' '}
+                {t.verificationBanner.unverifiedNoticeMiddle}
+                {t.verificationBanner.unverifiedNoticeSuffix ? ` ${t.verificationBanner.unverifiedNoticeSuffix}` : ''}
               </span>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
@@ -1301,7 +1390,9 @@ export default function App() {
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-blue-300 dark:border-blue-700 bg-white dark:bg-[#14192B] px-2.5 text-[11px] font-semibold text-blue-800 dark:text-blue-200 hover:bg-blue-100/70 dark:hover:bg-blue-900/50 disabled:opacity-60 transition-colors cursor-pointer whitespace-nowrap"
               >
                 <span>
-                  {verificationActionBusy === 'resend' ? 'Mengirim...' : 'Kirim Ulang Email'}
+                  {verificationActionBusy === 'resend'
+                    ? t.verificationBanner.sending
+                    : t.verificationBanner.resendEmail}
                 </span>
               </button>
               <button
@@ -1314,13 +1405,15 @@ export default function App() {
                   className={`h-3 w-3 ${verificationActionBusy === 'reload' ? 'animate-spin' : ''}`}
                 />
                 <span>
-                  {verificationActionBusy === 'reload' ? 'Memeriksa...' : 'Sudah Verifikasi? Cek Ulang'}
+                  {verificationActionBusy === 'reload'
+                    ? t.verificationBanner.checking
+                    : t.verificationBanner.checkAgain}
                 </span>
               </button>
               <button
                 type="button"
                 onClick={() => setVerificationBannerDismissed(true)}
-                aria-label="Tutup banner verifikasi"
+                aria-label={t.verificationBanner.dismissAria}
                 className="rounded-md p-1 text-blue-700 hover:bg-blue-200/50 dark:text-blue-300 dark:hover:bg-blue-900/50 cursor-pointer"
               >
                 <X className="h-3.5 w-3.5" />
@@ -1348,6 +1441,7 @@ export default function App() {
                     message={msg}
                     isStreaming={isThisStreaming}
                     isLastModelMessage={isLastModel}
+                    isPrivilegedAdmin={isPrivilegedAdminUser(displayUser, displayAdminLevel)}
                     onQuickRefine={(instruction) => {
                       void sendMessage(instruction);
                     }}
@@ -1392,6 +1486,8 @@ export default function App() {
         showTranscriptBox={showLiveTranscript}
         activeMode={activeMode}
         user={isCloudUser ? user : null}
+        adminLevel={effectiveAdminLevel}
+        lang={lang}
         onClose={(transcriptLog) => {
           void handleLiveClose(transcriptLog);
         }}
@@ -1407,10 +1503,12 @@ export default function App() {
         isAdmin={isAdmin}
         adminLevel={effectiveAdminLevel}
         currentUser={user}
+        lang={lang}
         onClose={() => setSettingsModalOpen(false)}
         onSetTheme={(dark) => setIsDark(dark)}
         onSetShowLiveTranscript={(show) => setShowLiveTranscript(show)}
         onInstallAndroid={install}
+        onSetLang={setLang}
       />
 
       <AdminModal

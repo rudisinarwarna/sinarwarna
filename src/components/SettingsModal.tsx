@@ -3,6 +3,7 @@ import type { User } from 'firebase/auth';
 import {
   CheckCircle2,
   Download,
+  Globe,
   MessageSquareText,
   Moon,
   PlusSquare,
@@ -14,6 +15,8 @@ import {
   X,
 } from 'lucide-react';
 import type { AdminLevel } from '../services/adminService';
+import type { AppLanguage } from '../services/maintenanceManager';
+import { useLanguage } from '../i18n/LanguageContext';
 import { AdminPanel } from './AdminPanel';
 import { SinarLogo } from './SinarLogo';
 
@@ -27,10 +30,12 @@ interface SettingsModalProps {
   isAdmin?: boolean;
   adminLevel?: AdminLevel;
   currentUser?: User | null;
+  lang?: AppLanguage;
   onClose: () => void;
   onSetTheme: (dark: boolean) => void;
   onSetShowLiveTranscript: (show: boolean) => void;
   onInstallAndroid: () => Promise<boolean>;
+  onSetLang?: (lang: AppLanguage) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -43,11 +48,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isAdmin = false,
   adminLevel = 'none',
   currentUser = null,
+  lang: propLang,
   onClose,
   onSetTheme,
   onSetShowLiveTranscript,
   onInstallAndroid,
+  onSetLang,
 }) => {
+  const { lang: ctxLang, setLang: setCtxLang, t } = useLanguage();
+  const activeLang = propLang || ctxLang;
+  const handleSelectLang = (next: AppLanguage) => {
+    setCtxLang(next);
+    onSetLang?.(next);
+  };
+
   const [activeTab, setActiveTab] = useState<'general' | 'admin'>('general');
   const [androidGuideOpen, setAndroidGuideOpen] = useState(false);
   const [safariGuideOpen, setSafariGuideOpen] = useState(isIOS);
@@ -84,7 +98,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       }}
       role="dialog"
       aria-modal="true"
-      aria-label="Pengaturan Sinar Warna"
+      aria-label={t.settings.dialogAria}
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4"
     >
       <div
@@ -98,13 +112,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="flex items-center gap-2.5">
             <SinarLogo size={24} />
             <h2 className="font-display text-base font-bold tracking-tight text-zinc-900 dark:text-white">
-              Pengaturan
+              {t.settings.title}
             </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Tutup pengaturan"
+            aria-label={t.settings.closeAria}
             className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white transition-colors cursor-pointer"
           >
             <X className="h-4 w-4" />
@@ -124,7 +138,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 <Settings className="h-3.5 w-3.5 text-[#0A36FF] dark:text-blue-400" />
-                <span>Umum &amp; Tampilan</span>
+                <span>{t.settings.tabGeneral}</span>
               </button>
               <button
                 type="button"
@@ -136,7 +150,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 <ShieldCheck className="h-3.5 w-3.5" />
-                <span>Administrator</span>
+                <span>{t.settings.tabAdmin}</span>
               </button>
             </div>
           </div>
@@ -151,10 +165,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <section className="space-y-2.5">
                 <div>
                   <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-                    Pengaturan Cahaya & Tema
+                    {t.settings.themeTitle}
                   </h3>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Pilih tampilan terang atau gelap sesuai kenyamanan mata Anda.
+                    {t.settings.themeDesc}
                   </p>
                 </div>
 
@@ -169,7 +183,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     }`}
                   >
                     <Sun className="h-4 w-4 text-amber-500 shrink-0" />
-                    <span>Tema Terang</span>
+                    <span>{t.settings.themeLight}</span>
                   </button>
                   <button
                     type="button"
@@ -181,7 +195,58 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     }`}
                   >
                     <Moon className="h-4 w-4 text-blue-400 shrink-0" />
-                    <span>Tema Gelap</span>
+                    <span>{t.settings.themeDark}</span>
+                  </button>
+                </div>
+              </section>
+
+              <div className="border-t border-zinc-200/80 dark:border-[#242C44]" />
+
+              {/* Pilihan Bahasa / Language / 语言 (3 Pilihan) */}
+              <section className="space-y-2.5">
+                <div>
+                  <h3 className="flex items-center gap-1.5 text-sm font-semibold text-zinc-900 dark:text-white">
+                    <Globe className="h-4 w-4 text-[#0A36FF] dark:text-blue-400 shrink-0" />
+                    <span>{t.settings.langTitle}</span>
+                  </h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {t.settings.langDesc}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5 rounded-2xl bg-zinc-100 p-1.5 dark:bg-[#0B0F1A]">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectLang('id')}
+                    className={`flex min-h-[44px] items-center justify-center rounded-xl px-2 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                      activeLang === 'id'
+                        ? 'bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] text-white shadow-sm'
+                        : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                    }`}
+                  >
+                    <span>{t.settings.langId}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectLang('en')}
+                    className={`flex min-h-[44px] items-center justify-center rounded-xl px-2 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                      activeLang === 'en'
+                        ? 'bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] text-white shadow-sm'
+                        : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                    }`}
+                  >
+                    <span>{t.settings.langEn}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectLang('zh')}
+                    className={`flex min-h-[44px] items-center justify-center rounded-xl px-2 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                      activeLang === 'zh'
+                        ? 'bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] text-white shadow-sm'
+                        : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                    }`}
+                  >
+                    <span>{t.settings.langZh}</span>
                   </button>
                 </div>
               </section>
@@ -194,10 +259,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="min-w-0">
                     <h3 className="flex items-center gap-1.5 text-sm font-semibold text-zinc-900 dark:text-white">
                       <MessageSquareText className="h-4 w-4 text-[#0A36FF] dark:text-blue-400 shrink-0" />
-                      <span>Kotak Teks Bicara AI Live</span>
+                      <span>{t.settings.liveTranscriptTitle}</span>
                     </h3>
                     <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                      Tampilkan atau sembunyikan kotak teks percakapan langsung saat memakai AI Live.
+                      {t.settings.liveTranscriptDesc}
                     </p>
                   </div>
                 </div>
@@ -212,7 +277,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
                     }`}
                   >
-                    <span>Hidupkan Teks</span>
+                    <span>{t.settings.liveTranscriptOn}</span>
                   </button>
                   <button
                     type="button"
@@ -223,7 +288,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
                     }`}
                   >
-                    <span>Matikan Teks</span>
+                    <span>{t.settings.liveTranscriptOff}</span>
                   </button>
                 </div>
               </section>
@@ -234,18 +299,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <section className="space-y-3">
                 <div>
                   <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-                    Download Aplikasi Sinar Warna
+                    {t.settings.installTitle}
                   </h3>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Pasang aplikasi web ke layar utama agar lebih cepat dibuka di Android maupun
-                    iPhone (Safari).
+                    {t.settings.installDesc}
                   </p>
                 </div>
 
                 {isInstalled ? (
                   <div className="flex items-center gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-xs font-medium text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/35 dark:text-emerald-200">
                     <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                    <span>Aplikasi Sinar Warna sudah terpasang di perangkat ini.</span>
+                    <span>{t.settings.alreadyInstalled}</span>
                   </div>
                 ) : (
                   <div className="space-y-2.5">
@@ -260,12 +324,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <Smartphone className="h-4 w-4 shrink-0" />
                         <span className="min-w-0">
                           <span className="block text-xs font-semibold">
-                            {installing ? 'Memproses...' : 'Download App untuk Android'}
+                            {installing ? t.settings.processing : t.settings.androidBtn}
                           </span>
                           <span className="block text-[11px] text-white/85 truncate">
                             {isInstallable
-                              ? 'Ketuk untuk langsung memasang di HP Android'
-                              : 'Pasang lewat Google Chrome Android'}
+                              ? t.settings.androidHintInstallable
+                              : t.settings.androidHintChrome}
                           </span>
                         </span>
                       </span>
@@ -275,16 +339,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     {androidGuideOpen && (
                       <div className="rounded-2xl border border-zinc-200 dark:border-[#242C44] bg-zinc-50 dark:bg-[#0B0F1A] p-3.5 text-xs leading-relaxed text-zinc-700 dark:text-zinc-300 space-y-1.5">
                         <p className="font-semibold text-zinc-900 dark:text-white">
-                          Cara Pasang di Android (Chrome):
+                          {t.settings.androidGuideTitle}
                         </p>
-                        <p>1. Buka halaman ini menggunakan browser Google Chrome.</p>
-                        <p>
-                          2. Ketuk ikon menu <strong>titik tiga (⋮)</strong> di pojok kanan atas.
-                        </p>
-                        <p>
-                          3. Pilih <strong>Tambahkan ke Layar Utama</strong> atau{' '}
-                          <strong>Instal aplikasi</strong>.
-                        </p>
+                        <p>{t.settings.androidStep1}</p>
+                        <p>{t.settings.androidStep2}</p>
+                        <p>{t.settings.androidStep3}</p>
                       </div>
                     )}
 
@@ -298,10 +357,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <Share className="h-4 w-4 shrink-0 text-[#0A36FF] dark:text-blue-400" />
                         <span className="min-w-0">
                           <span className="block text-xs font-semibold">
-                            Download App untuk Apple Safari
+                            {t.settings.safariBtn}
                           </span>
                           <span className="block text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
-                            Panduan pasang di iPhone, iPad, atau Mac Safari
+                            {t.settings.safariHint}
                           </span>
                         </span>
                       </span>
@@ -311,21 +370,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     {safariGuideOpen && (
                       <div className="rounded-2xl border border-zinc-200 dark:border-[#242C44] bg-zinc-50 dark:bg-[#0B0F1A] p-3.5 text-xs leading-relaxed text-zinc-700 dark:text-zinc-300 space-y-1.5">
                         <p className="font-semibold text-zinc-900 dark:text-white">
-                          Cara Pasang di Safari Apple (iPhone / iPad):
+                          {t.settings.safariGuideTitle}
                         </p>
-                        <p>
-                          1. Pastikan situs dibuka lewat browser <strong>Safari</strong>.
-                        </p>
+                        <p>{t.settings.safariStep1}</p>
                         <p className="flex items-center gap-1.5 flex-wrap">
-                          <span>2. Ketuk tombol</span>
+                          <span>{t.settings.safariStep2Prefix}</span>
                           <span className="inline-flex items-center gap-1 font-semibold text-[#0A36FF] dark:text-blue-400">
-                            <Share className="h-3.5 w-3.5" /> Bagikan (Share)
+                            <Share className="h-3.5 w-3.5" /> {t.settings.safariStep2Share}
                           </span>
-                          <span>di bagian bawah layar Safari.</span>
+                          <span>{t.settings.safariStep2Suffix}</span>
                         </p>
                         <p>
-                          3. Gulir ke bawah, pilih <strong>Tambah ke Layar Utama</strong> (
-                          <em>Add to Home Screen</em>), lalu ketuk <strong>Tambah</strong>.
+                          {t.settings.safariStep3Prefix}{' '}
+                          <strong>{t.settings.safariStep3AddHome}</strong>{' '}
+                          {t.settings.safariStep3Middle}{' '}
+                          <strong>{t.settings.safariStep3Add}</strong>.
                         </p>
                       </div>
                     )}

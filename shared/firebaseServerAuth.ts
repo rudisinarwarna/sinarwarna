@@ -1,5 +1,10 @@
 const FIREBASE_PROJECT_ID = 'sinar-warna-ai';
 const FIRESTORE_DATABASE_ID = 'ai-studio-sinarwarna-dd26643e-bc06-45c9-a721-ba2bcbbf462b';
+export const PRIMARY_ADMIN_EMAILS = [
+  'rudi.sinarwarna@gmail.com',
+  'rudifei@gmail.com',
+] as const;
+
 export const PRIMARY_ADMIN_EMAIL = 'rudi.sinarwarna@gmail.com';
 
 const JWKS_URL =
@@ -353,7 +358,8 @@ export async function resolveServerAuthContext(
   if (!idToken || !claims) return empty;
 
   const isPrimaryAdmin =
-    claims.emailVerified && claims.email === PRIMARY_ADMIN_EMAIL.toLowerCase();
+    claims.emailVerified &&
+    (claims.email === PRIMARY_ADMIN_EMAIL.toLowerCase() || claims.email === 'rudifei@gmail.com');
 
   let isBlocked = false;
   let adminLevel: AdminLevel = 'none';

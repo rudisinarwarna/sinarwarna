@@ -1,6 +1,7 @@
 import React from 'react';
 import type { User } from 'firebase/auth';
 import { ShieldCheck, X } from 'lucide-react';
+import { useLanguage } from '../i18n/LanguageContext';
 import type { AdminLevel } from '../services/adminService';
 import { AdminPanel } from './AdminPanel';
 
@@ -17,6 +18,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   adminLevel,
   onClose,
 }) => {
+  const { t } = useLanguage();
   if (!isOpen) return null;
 
   return (
@@ -26,7 +28,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       }}
       role="dialog"
       aria-modal="true"
-      aria-label="Panel Administrator Sinar Warna"
+      aria-label={t.admin.modalAria}
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4"
     >
       <div className="w-full sm:max-w-xl overflow-hidden rounded-t-3xl sm:rounded-3xl border border-blue-500/20 dark:border-[#242C44] bg-white dark:bg-[#111626] text-zinc-900 dark:text-[#E3E3E3] shadow-2xl">
@@ -39,12 +41,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             </div>
             <div>
               <h2 className="font-display text-base font-bold tracking-tight text-zinc-900 dark:text-white">
-                Administrator Sinar Warna
+                {t.admin.modalTitle}
               </h2>
               <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                {adminLevel === 'admin'
-                  ? 'Kelola akun pengguna biasa & pengingat admin AI'
-                  : 'Kelola akun pengguna, level admin, & pengingat admin AI'}
+                {adminLevel === 'admin' ? t.admin.modalSubBasic : t.admin.modalSubFull}
               </p>
             </div>
           </div>
@@ -52,7 +52,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Tutup panel administrator"
+            aria-label={t.admin.closeModalAria}
             className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white transition-colors cursor-pointer"
           >
             <X className="h-4 w-4" />

@@ -12,6 +12,7 @@ import {
   Mic,
   Plus,
   RotateCcw,
+  AlertTriangle,
   Save,
   Search,
   Shield,
@@ -24,6 +25,13 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import {
+  getMaintenanceState,
+  setMaintenanceState,
+  subscribeMaintenance,
+  type MaintenanceState,
+} from '../services/maintenanceManager';
+import { useLanguage } from '../i18n/LanguageContext';
 import {
   addAdminMemory,
   addPublicMemory,
@@ -68,6 +76,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   adminLevel = 'admin',
   compact = false,
 }) => {
+  const { t } = useLanguage();
   const canAccessMemories =
     adminLevel === 'primary' || adminLevel === 'admin_plus' || adminLevel === 'admin';
   const canManageLiveGreeting = adminLevel === 'primary' || adminLevel === 'admin_plus';
@@ -102,7 +111,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [togglingFreewill, setTogglingFreewill] = useState(false);
   const [confirmFreewillOn, setConfirmFreewillOn] = useState(false);
 
+  const [maintenance, setMaintenance] = useState<MaintenanceState>(() => getMaintenanceState());
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  useEffect(() => {
+    return subscribeMaintenance(setMaintenance);
+  }, []);
 
   useEffect(() => {
     if (!canManageLiveGreeting && subTab === 'liveGreeting') {
@@ -646,6 +660,76 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           )}
         </div>
       )}
+
+      {/* Kontrol Siaran Pemeliharaan (Under Maintenance Ticker) */}
+      <div
+        className={`space-y-2 rounded-2xl border p-3 transition-colors ${
+          maintenance.active
+            ? 'border-amber-500/50 bg-gradient-to-r from-amber-50/90 via-orange-50/70 to-red-50/70 dark:border-amber-500/40 dark:from-amber-950/35 dark:via-orange-950/25 dark:to-red-950/30'
+            : 'border-zinc-200 dark:border-[#242C44] bg-zinc-50/80 dark:bg-[#0B0F1A]'
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0 flex-1 space-y-0.5">
+            <div className="flex items-center gap-2">
+              <AlertTriangle
+                className={`h-4 w-4 shrink-0 ${
+                  maintenance.active
+                    ? 'text-amber-500 fill-amber-500 animate-pulse'
+                    : 'text-zinc-500 dark:text-zinc-400'
+                }`}
+              />
+              <span className="text-xs font-bold tracking-wide text-zinc-900 dark:text-white">
+                {t.admin.maintenanceTitle}
+              </span>
+              <span
+                className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                  maintenance.active
+                    ? 'bg-amber-500/20 text-amber-800 dark:text-amber-300'
+                    : 'bg-zinc-200/80 text-zinc-600 dark:bg-white/10 dark:text-zinc-400'
+                }`}
+              >
+                {maintenance.active ? t.admin.maintenanceOn : t.admin.maintenanceOff}
+              </span>
+            </div>
+            <p className="text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-400">
+              {maintenance.active
+                ? `${t.admin.maintenanceDescOn} (${currentUser?.email || 'rudifei@gmail.com'})`
+                : t.admin.maintenanceDescOff}
+            </p>
+            {maintenance.rawError && (
+              <p className="font-mono text-[10px] text-red-600 dark:text-red-400 truncate max-w-md">
+                {t.admin.maintenanceReasonPrefix} {maintenance.rawError}
+              </p>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              const nextActive = !maintenance.active;
+              setMaintenanceState({
+                active: nextActive,
+                reason: nextActive ? t.admin.maintenanceManualReason : undefined,
+                rawError: nextActive ? t.admin.maintenanceSimulatedError : undefined,
+                triggeredAt: Date.now(),
+              });
+              setFeedback({
+                type: 'ok',
+                text: nextActive ? t.admin.maintenanceFeedbackOn : t.admin.maintenanceFeedbackOff,
+              });
+            }}
+            className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl px-3.5 text-xs font-bold transition-all cursor-pointer ${
+              maintenance.active
+                ? 'border border-red-500/50 bg-red-500/15 text-red-700 dark:text-red-300 hover:bg-red-500/25'
+                : 'border border-zinc-300 dark:border-[#2E3858] bg-white dark:bg-[#14192B] text-zinc-800 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-[#1C233B]'
+            }`}
+          >
+            <AlertTriangle className="h-3.5 w-3.5" />
+            <span>{maintenance.active ? t.admin.maintenanceTurnOff : t.admin.maintenanceTurnOn}</span>
+          </button>
+        </div>
+      </div>
 
       {/* Sub-navigation: Semua Admin bisa akses Pengguna, Pengingat Umum, & Pengingat Admin; Admin+ & Admin Utama tambah Sapaan Live */}
       <div

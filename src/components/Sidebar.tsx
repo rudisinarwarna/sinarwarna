@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import type { Conversation } from '../types/chat';
+import { useLanguage } from '../i18n/LanguageContext';
 import { SinarLogo } from './SinarLogo';
 import { VerifiedBlueBadge } from './VerifiedBlueBadge';
 
@@ -63,6 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSignOut,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const { t } = useLanguage();
 
   const filteredConversations = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -86,8 +88,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <button
           type="button"
           onClick={onToggleDesktop}
-          title="Tutup panel samping"
-          aria-label="Tutup panel samping"
+          title={t.sidebar.closeSidebar}
+          aria-label={t.sidebar.closeSidebar}
           className="hidden lg:inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-600 hover:bg-blue-600/10 hover:text-blue-700 dark:text-zinc-400 dark:hover:bg-blue-500/15 dark:hover:text-white transition-colors cursor-pointer"
         >
           <PanelLeftClose className="h-4 w-4" />
@@ -103,8 +105,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <button
           type="button"
           onClick={onCloseMobile}
-          title="Tutup menu"
-          aria-label="Tutup menu"
+          title={t.sidebar.closeMenu}
+          aria-label={t.sidebar.closeMenu}
           className="inline-flex lg:hidden h-11 w-11 items-center justify-center rounded-xl text-zinc-600 hover:bg-red-500/15 hover:text-red-600 dark:text-zinc-300 dark:hover:bg-red-500/20 dark:hover:text-red-300 transition-colors cursor-pointer"
         >
           <X className="h-5 w-5" />
@@ -122,7 +124,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           className="flex min-h-[44px] w-full items-center gap-2.5 rounded-xl bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] px-3.5 text-sm font-semibold text-white shadow-sm shadow-blue-600/20 hover:opacity-95 transition-opacity cursor-pointer whitespace-nowrap"
         >
           <Plus className="h-4 w-4 shrink-0" />
-          <span>Percakapan Baru</span>
+          <span>{t.sidebar.newChat}</span>
         </button>
       </div>
 
@@ -131,10 +133,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="mb-2 flex items-center justify-between px-2">
           <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
             {(isCloudUser ?? Boolean(user))
-              ? 'Riwayat Cloud'
+              ? t.sidebar.historyCloud
               : user
-              ? 'Riwayat (Belum Verifikasi)'
-              : 'Riwayat (Mode Tamu)'}
+              ? t.sidebar.historyUnverified
+              : t.sidebar.historyGuest}
           </span>
           {conversations.length > 0 && (
             <span className="text-[11px] font-mono tabular-nums text-zinc-400 dark:text-zinc-500">
@@ -150,8 +152,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari riwayat..."
-              aria-label="Cari riwayat percakapan"
+              placeholder={t.sidebar.searchPlaceholder}
+              aria-label={t.sidebar.searchAria}
               className="h-9 w-full rounded-lg border border-zinc-200 dark:border-[#2A3350] bg-white dark:bg-[#0B0F1A] pl-8 pr-3 text-xs text-zinc-800 placeholder:text-zinc-400 dark:text-zinc-200 dark:placeholder:text-zinc-500 focus:outline-none focus:border-blue-500"
             />
           </div>
@@ -161,10 +163,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {filteredConversations.length === 0 ? (
             <p className="px-2 py-4 text-xs leading-relaxed text-zinc-500 dark:text-zinc-500">
               {!(isCloudUser ?? Boolean(user))
-                ? 'Belum daftar/masuk akun. Obrolan sementara ini tidak disimpan di riwayat dan akan hilang setelah keluar.'
+                ? t.sidebar.emptyGuest
                 : conversations.length === 0
-                ? 'Belum ada riwayat. Mulai percakapan untuk menyimpan ide kreatif Anda.'
-                : 'Tidak ada percakapan yang cocok.'}
+                ? t.sidebar.emptyCloud
+                : t.sidebar.emptySearch}
             </p>
           ) : (
             filteredConversations.map((conv) => {
@@ -195,8 +197,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       e.stopPropagation();
                       onDeleteConversation(conv.id);
                     }}
-                    title="Hapus percakapan"
-                    aria-label={`Hapus ${conv.title}`}
+                    title={t.sidebar.deleteConv}
+                    aria-label={`${t.common.delete} ${conv.title}`}
                     className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100 hover:bg-red-500/15 hover:text-red-600 dark:hover:text-red-400 transition-opacity cursor-pointer"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -220,7 +222,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         >
           <span className="flex items-center gap-2.5">
             <Settings className="h-4 w-4 text-[#0A36FF] dark:text-blue-400" />
-            <span>Pengaturan</span>
+            <span>{t.sidebar.settings}</span>
           </span>
         </button>
 
@@ -242,12 +244,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="min-w-0">
                 <div className="flex items-center gap-1 min-w-0">
                   <p className="truncate text-xs font-medium text-zinc-900 dark:text-zinc-100">
-                    {user.displayName || 'Kreator Sinar Warna'}
+                    {user.displayName || t.sidebar.defaultCreatorName}
                   </p>
                   {(isAdmin || isVerifiedBadge) && (
                     <VerifiedBlueBadge
                       size="xs"
-                      title={isAdmin ? 'Admin Terverifikasi' : 'Akun Terverifikasi'}
+                      title={isAdmin ? t.common.verifiedAdmin : t.common.verifiedAccount}
                     />
                   )}
                 </div>
@@ -261,8 +263,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               type="button"
               onClick={onSignOut}
-              title="Keluar akun"
-              aria-label="Keluar akun"
+              title={t.sidebar.signOut}
+              aria-label={t.sidebar.signOut}
               className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-500 hover:bg-red-500/15 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 transition-colors cursor-pointer"
             >
               <LogOut className="h-4 w-4" />
@@ -271,7 +273,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ) : !authReady ? (
           <div className="flex min-h-[44px] w-full items-center gap-2.5 rounded-xl border border-zinc-200/70 dark:border-[#242C44] bg-white/60 dark:bg-[#171E33]/60 px-3 text-xs text-zinc-500 dark:text-zinc-400">
             <div className="h-6 w-6 shrink-0 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-700" />
-            <span className="truncate">Memeriksa akun...</span>
+            <span className="truncate">{t.sidebar.checkingAccount}</span>
           </div>
         ) : (
           <button
@@ -284,7 +286,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             className="flex min-h-[44px] w-full items-center gap-2.5 rounded-xl border border-blue-500/30 bg-white dark:bg-[#171E33] px-3 text-xs font-semibold text-zinc-800 hover:border-blue-500/60 hover:bg-blue-50/50 dark:text-zinc-100 dark:hover:bg-[#1E2742] disabled:opacity-60 transition-colors cursor-pointer whitespace-nowrap"
           >
             <LogIn className="h-4 w-4 shrink-0 text-[#0A36FF] dark:text-blue-400" />
-            <span>{authLoading ? 'Menghubungkan...' : 'Masuk / Daftar Akun'}</span>
+            <span>{authLoading ? t.sidebar.connecting : t.sidebar.signInOrRegister}</span>
           </button>
         )}
       </div>

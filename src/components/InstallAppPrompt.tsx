@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Download, Share, X } from 'lucide-react';
+import { useLanguage } from '../i18n/LanguageContext';
 import { SinarLogo } from './SinarLogo';
 
 const INSTALL_DISMISSED_KEY = 'sinar-warna-install-dismissed-v1';
@@ -37,6 +38,7 @@ export const InstallAppPrompt: React.FC<InstallAppPromptProps> = ({
   onOpenSettings,
   onDismiss,
 }) => {
+  const { t } = useLanguage();
   const [showSafariSteps, setShowSafariSteps] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -68,7 +70,7 @@ export const InstallAppPrompt: React.FC<InstallAppPromptProps> = ({
   return (
     <div
       role="dialog"
-      aria-label="Pasang aplikasi web Sinar Warna"
+      aria-label={t.installPrompt.dialogAria}
       className="fixed bottom-3 left-3 right-3 z-40 mx-auto max-w-md rounded-2xl border border-blue-500/25 dark:border-[#293456] bg-white/95 dark:bg-[#111626]/95 p-4 shadow-2xl backdrop-blur-md sm:bottom-5 sm:left-auto sm:right-5"
     >
       <div className="flex items-start gap-3">
@@ -79,16 +81,16 @@ export const InstallAppPrompt: React.FC<InstallAppPromptProps> = ({
           <div className="flex items-start justify-between gap-2">
             <div>
               <h3 className="font-display text-sm font-bold text-zinc-900 dark:text-white">
-                Pasang Aplikasi Sinar Warna
+                {t.installPrompt.title}
               </h3>
               <p className="mt-0.5 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
-                Instal web app di layar utama Android atau Safari iPhone agar lebih cepat dibuka.
+                {t.installPrompt.desc}
               </p>
             </div>
             <button
               type="button"
               onClick={onDismiss}
-              aria-label="Tutup tawaran instal aplikasi"
+              aria-label={t.installPrompt.closeAria}
               className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10 dark:hover:text-zinc-200 transition-colors cursor-pointer"
             >
               <X className="h-4 w-4" />
@@ -98,14 +100,15 @@ export const InstallAppPrompt: React.FC<InstallAppPromptProps> = ({
           {showSafariSteps && (
             <div className="mt-2.5 rounded-xl border border-zinc-200 dark:border-[#242C44] bg-zinc-50 dark:bg-[#0B0F1A] p-2.5 text-[11px] leading-relaxed text-zinc-700 dark:text-zinc-300 space-y-1">
               <p>
-                1. Ketuk ikon{' '}
+                {t.installPrompt.step1Prefix}{' '}
                 <span className="inline-flex items-center gap-1 font-semibold text-[#0A36FF] dark:text-blue-400">
-                  <Share className="h-3 w-3" /> Bagikan (Share)
+                  <Share className="h-3 w-3" /> {t.installPrompt.step1Share}
                 </span>{' '}
-                di bar bawah Safari.
+                {t.installPrompt.step1Suffix}
               </p>
               <p>
-                2. Pilih <strong>Tambah ke Layar Utama</strong>, lalu ketuk <strong>Tambah</strong>.
+                {t.installPrompt.step2Prefix} <strong>{t.installPrompt.step2AddHome}</strong>
+                {t.installPrompt.step2Middle} <strong>{t.installPrompt.step2Add}</strong>.
               </p>
             </div>
           )}
@@ -124,12 +127,12 @@ export const InstallAppPrompt: React.FC<InstallAppPromptProps> = ({
               )}
               <span>
                 {busy
-                  ? 'Memasang...'
+                  ? t.installPrompt.installing
                   : isInstallable
-                  ? 'Instal Web App'
+                  ? t.installPrompt.installWebApp
                   : isIOS
-                  ? 'Pasang di Safari iPhone'
-                  : 'Instal Web App'}
+                  ? t.installPrompt.installSafari
+                  : t.installPrompt.installWebApp}
               </span>
             </button>
 
@@ -138,7 +141,7 @@ export const InstallAppPrompt: React.FC<InstallAppPromptProps> = ({
               onClick={onDismiss}
               className="inline-flex min-h-[40px] items-center justify-center rounded-xl border border-zinc-200 dark:border-[#293456] px-3 text-xs font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-white/5 transition-colors cursor-pointer whitespace-nowrap"
             >
-              Nanti Saja
+              {t.installPrompt.later}
             </button>
           </div>
         </div>

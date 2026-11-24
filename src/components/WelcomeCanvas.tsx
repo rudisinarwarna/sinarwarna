@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLanguage } from '../i18n/LanguageContext';
 import {
   KoAwenAnniversaryBackdrop,
   KoAwenAnniversaryHeader,
@@ -7,6 +8,7 @@ import {
 
 export const WelcomeCanvas: React.FC = () => {
   const [imgFailed, setImgFailed] = useState(false);
+  const { t } = useLanguage();
 
   return (
     <div className="relative flex min-h-full w-full flex-col items-center justify-center overflow-hidden px-5 py-7 text-center sm:py-10">
@@ -42,7 +44,7 @@ export const WelcomeCanvas: React.FC = () => {
         {/* Minimal, elegant Gemini-style greeting */}
         <div className="space-y-2">
           <h1 className="font-display text-[clamp(1.45rem,3.8vw,2.35rem)] font-semibold leading-[1.2] tracking-tight text-zinc-900 dark:text-white [text-wrap:balance]">
-            Hai, selamat datang di{' '}
+            {t.welcome.greetingPrefix}{' '}
             <span className="bg-gradient-to-r from-[#E51D2B] via-[#6366F1] to-[#0A36FF] bg-clip-text text-transparent dark:from-[#FF4D5A] dark:via-[#818CF8] dark:to-[#4F8BFF]">
               Sinar Warna
             </span>
@@ -50,7 +52,7 @@ export const WelcomeCanvas: React.FC = () => {
           </h1>
 
           <p className="text-sm sm:text-base font-medium text-zinc-600 dark:text-zinc-300">
-            Ada yang mau di tanya seputar cat atau lainnya?
+            {t.welcome.subtitle}
           </p>
         </div>
 

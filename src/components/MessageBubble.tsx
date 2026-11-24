@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { AlertCircle, Check, Copy, RefreshCw, Sparkles, Wand2 } from 'lucide-react';
+import { AlertCircle, Check, Copy, RefreshCw, ShieldAlert, Sparkles, Wand2 } from 'lucide-react';
+import { useLanguage } from '../i18n/LanguageContext';
+import { isQuotaOrLimitError } from '../services/maintenanceManager';
 import type { ChatMessage } from '../types/chat';
 import { MarkdownMessage } from './MarkdownMessage';
 import { SinarLogo } from './SinarLogo';
@@ -8,6 +10,7 @@ interface MessageBubbleProps {
   message: ChatMessage;
   isStreaming?: boolean;
   isLastModelMessage?: boolean;
+  isPrivilegedAdmin?: boolean;
   onQuickRefine?: (instruction: string) => void;
   onRegenerate?: () => void;
 }
@@ -16,10 +19,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   message,
   isStreaming = false,
   isLastModelMessage = false,
+  isPrivilegedAdmin = false,
   onQuickRefine,
   onRegenerate,
 }) => {
   const [copied, setCopied] = useState(false);
+  const { t } = useLanguage();
 
   const handleCopy = async () => {
     if (!message.text) return;
@@ -50,7 +55,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             </div>
           ) : message.attachmentNames && message.attachmentNames.length > 0 ? (
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              Lampiran gambar: {message.attachmentNames.join(', ')}
+              {t.messageBubble.attachmentLabel} {message.attachmentNames.join(', ')}
             </p>
           ) : null}
           {message.text && <p className="whitespace-pre-wrap break-words">{message.text}</p>}
@@ -70,8 +75,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           <div className="rounded-xl border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/30 p-3.5 text-sm text-red-800 dark:text-red-200">
             <div className="flex items-start gap-2.5">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-              <div className="space-y-2">
-                <p className="leading-relaxed">{message.error}</p>
+              <div className="space-y-2 min-w-0 flex-1">
+                {isPrivilegedAdmin && isQuotaOrLimitError(message.error) && (
+                  <div className="inline-flex items-center gap-1.5 rounded-md border border-amber-400/50 bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                    <ShieldAlert className="h-3 w-3" />
+                    <span>{t.messageBubble.adminRawErrorBadge}</span>
+                  </div>
+                )}
+                <p className="leading-relaxed break-words">{message.error}</p>
                 {onRegenerate && (
                   <button
                     type="button"
@@ -79,14 +90,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 dark:border-red-800 bg-white dark:bg-[#1E1F20] px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/50 transition-colors cursor-pointer whitespace-nowrap shrink-0"
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
-                    <span>Coba Lagi</span>
+                    <span>{t.messageBubble.retryBtn}</span>
                   </button>
                 )}
               </div>
             </div>
           </div>
         ) : isStreaming && !message.text ? (
-          <div className="space-y-2.5 py-1" aria-label="Sinar Warna sedang menyusun jawaban">
+          <div className="space-y-2.5 py-1" aria-label={t.messageBubble.thinkingAria}>
             <div className="h-3.5 w-3/4 rounded-md bg-zinc-200/80 dark:bg-zinc-800 animate-pulse" />
             <div className="h-3.5 w-full rounded-md bg-zinc-200/70 dark:bg-zinc-800/80 animate-pulse" />
             <div className="h-3.5 w-2/3 rounded-md bg-zinc-200/60 dark:bg-zinc-800/60 animate-pulse" />
@@ -105,12 +116,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               {copied ? (
                 <>
                   <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                  <span>Tersalin</span>
+                  <span>{t.messageBubble.copied}</span>
                 </>
               ) : (
                 <>
                   <Copy className="h-3.5 w-3.5" />
-                  <span>Salin</span>
+                  <span>{t.messageBubble.copy}</span>
                 </>
               )}
             </button>
@@ -122,7 +133,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-[#28292C] dark:hover:text-zinc-100 transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
-                <span>Regenerasi</span>
+                <span>{t.messageBubble.regenerate}</span>
               </button>
             )}
 
@@ -133,23 +144,19 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </span>
                 <button
                   type="button"
-                  onClick={() =>
-                    onQuickRefine('Ringkas jawaban di atas menjadi versi yang lebih padat dan siap pakai.')
-                  }
+                  onClick={() => onQuickRefine(t.messageBubble.moreConcisePrompt)}
                   className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-[#28292C] dark:hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <Wand2 className="h-3.5 w-3.5" />
-                  <span>Lebih Ringkas</span>
+                  <span>{t.messageBubble.moreConcise}</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() =>
-                    onQuickRefine('Kembangkan ide di atas dengan 3 variasi kreatif baru yang lebih berani dan detail.')
-                  }
+                  onClick={() => onQuickRefine(t.messageBubble.newVariationsPrompt)}
                   className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-[#28292C] dark:hover:text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <Sparkles className="h-3.5 w-3.5" />
-                  <span>Variasi Baru</span>
+                  <span>{t.messageBubble.newVariations}</span>
                 </button>
               </>
             )}
