@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Download, Share, X } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
-import { SinarLogo } from './SinarLogo';
 
 const INSTALL_DISMISSED_KEY = 'sinar-warna-install-dismissed-v1';
 
@@ -75,7 +74,11 @@ export const InstallAppPrompt: React.FC<InstallAppPromptProps> = ({
     >
       <div className="flex items-start gap-3">
         <div className="mt-0.5 shrink-0">
-          <SinarLogo size={34} />
+          <img
+            src="/apple-touch-icon.png?v=2"
+            alt="Logo Sinar Warna"
+            className="h-11 w-11 rounded-xl border border-zinc-200/90 bg-white object-contain p-0.5 shadow-sm"
+          />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
