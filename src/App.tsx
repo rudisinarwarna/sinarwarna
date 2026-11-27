@@ -16,11 +16,6 @@ import { AdminModal } from './components/AdminModal';
 import { AuthScreen } from './components/AuthScreen';
 import { VerifiedBlueBadge } from './components/VerifiedBlueBadge';
 import { CameraCaptureModal } from './components/CameraCaptureModal';
-import {
-  InstallAppPrompt,
-  isInstallPromptDismissed,
-  markInstallPromptDismissed,
-} from './components/InstallAppPrompt';
 import { LiveStudioModal } from './components/LiveStudioModal';
 import { MaintenanceBroadcastBanner } from './components/MaintenanceBroadcastBanner';
 import { MessageBubble } from './components/MessageBubble';
@@ -184,9 +179,6 @@ export default function App() {
   const [freewillEnabled, setFreewillEnabled] = useState<boolean>(false);
   const [isVerifiedBadge, setIsVerifiedBadge] = useState<boolean>(() =>
     Boolean(cachedAuth?.isEmailVerified && cachedAuth.isVerifiedBadge)
-  );
-  const [showInstallBanner, setShowInstallBanner] = useState<boolean>(
-    () => !isInstallPromptDismissed()
   );
   const [pendingCameraAttachment, setPendingCameraAttachment] = useState<ImageAttachment | null>(
     null
@@ -1594,20 +1586,6 @@ export default function App() {
         adminLevel={effectiveAdminLevel}
         onClose={() => setAdminModalOpen(false)}
       />
-
-      {showInstallBanner && !isInstalled && !settingsModalOpen && !adminModalOpen && !liveModalOpen && !authModalOpen && (
-        <InstallAppPrompt
-          isInstallable={isInstallable}
-          isInstalled={isInstalled}
-          isIOS={isIOS}
-          onInstall={install}
-          onOpenSettings={() => setSettingsModalOpen(true)}
-          onDismiss={() => {
-            markInstallPromptDismissed();
-            setShowInstallBanner(false);
-          }}
-        />
-      )}
 
       {authModalOpen && !user && (
         <AuthScreen
