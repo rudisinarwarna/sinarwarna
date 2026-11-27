@@ -17,8 +17,14 @@ import {
   type AdminMemoryItem,
 } from './sinarWarnaPrompt.ts';
 
+export interface ChatStreamSource {
+  title: string;
+  uri: string;
+}
+
 export interface ChatStreamEvent {
   text?: string;
+  sources?: ChatStreamSource[];
   memoryAction?: {
     type: 'saved' | 'deleted';
     detail: string;
@@ -58,11 +64,22 @@ export async function runChatStreamWithTools(params: {
   contents: Content[];
   mode: string;
   thinkingDepth: 'fast' | 'deep';
+  language?: string;
+  currentDateText?: string;
   authContext: ServerAuthContext;
   abortSignal: AbortSignal;
   onEvent: (event: ChatStreamEvent) => Promise<void> | void;
 }): Promise<void> {
-  const { ai, mode, thinkingDepth, authContext, abortSignal, onEvent } = params;
+  const {
+    ai,
+    mode,
+    thinkingDepth,
+    language,
+    currentDateText,
+    authContext,
+    abortSignal,
+    onEvent,
+  } = params;
 
   const useSemiGaul = authContext.isAdmin || authContext.freewill.enabled;
   const includePrivateMemories =
@@ -198,10 +215,13 @@ export async function runChatStreamWithTools(params: {
 
   let workingContents: Content[] = [...photoPrimerTurns, ...params.contents];
   const attempts = getChatAttempts(thinkingDepth);
-  const tools = getChatToolsForUser({
+  const { tools, toolConfig } = getChatToolsForUser({
     canManageAdminMemories,
     canManagePublicMemories,
+    includeGoogleSearch: true,
   });
+
+  const collectedSourcesMap = new Map<string, ChatStreamSource>();
 
   for (let turn = 0; turn < 3; turn++) {
     if (abortSignal.aborted) break;
@@ -219,6 +239,8 @@ export async function runChatStreamWithTools(params: {
       publicMemories: effectivePublicMemories,
       canManageAdminMemories,
       canManagePublicMemories,
+      language,
+      currentDateText,
     });
 
     let activeIterator: AsyncIterator<
@@ -246,6 +268,7 @@ export async function runChatStreamWithTools(params: {
           config: {
             systemInstruction,
             ...(tools ? { tools } : {}),
+            ...(toolConfig ? { toolConfig } : {}),
             thinkingConfig: { thinkingLevel: step.level },
             abortSignal: stepTimer.signal,
           },
@@ -276,9 +299,29 @@ export async function runChatStreamWithTools(params: {
     while (!current.done) {
       if (abortSignal.aborted) break;
       const chunk = current.value;
-      const candidateParts = chunk?.candidates?.[0]?.content?.parts;
+      const candidate = chunk?.candidates?.[0];
+      const candidateParts = candidate?.content?.parts;
       if (Array.isArray(candidateParts) && candidateParts.length > 0) {
         collectedModelParts.push(...candidateParts);
+      }
+      const groundingChunks = candidate?.groundingMetadata?.groundingChunks;
+      if (Array.isArray(groundingChunks)) {
+        for (const gc of groundingChunks) {
+          const webUri = gc?.web?.uri;
+          if (webUri && !collectedSourcesMap.has(webUri)) {
+            collectedSourcesMap.set(webUri, {
+              uri: webUri,
+              title: (gc?.web?.title || webUri).trim(),
+            });
+          }
+          const mapUri = gc?.maps?.uri;
+          if (mapUri && !collectedSourcesMap.has(mapUri)) {
+            collectedSourcesMap.set(mapUri, {
+              uri: mapUri,
+              title: (gc?.maps?.title || 'Google Maps').trim(),
+            });
+          }
+        }
       }
       if (Array.isArray(chunk?.functionCalls) && chunk.functionCalls.length > 0) {
         for (const fc of chunk.functionCalls) {
@@ -418,5 +461,11 @@ export async function runChatStreamWithTools(params: {
       { role: 'model', parts: collectedModelParts },
       { role: 'user', parts: responseParts },
     ];
+  }
+
+  if (collectedSourcesMap.size > 0 && !abortSignal.aborted) {
+    await onEvent({
+      sources: Array.from(collectedSourcesMap.values()).slice(0, 8),
+    });
   }
 }

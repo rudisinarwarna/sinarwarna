@@ -1,5 +1,8 @@
 import {
+  FunctionResponseScheduling,
+  InteractionStatus,
   Modality,
+  ThinkingLevel,
   type Content,
   type GoogleGenAI,
   type LiveServerMessage,
@@ -31,6 +34,8 @@ export interface LiveClientMessage {
   video?: string;
   text?: string;
   switchVoice?: string;
+  location?: { lat: number; lng: number } | null;
+  locationDenied?: boolean;
   ping?: boolean;
 }
 
@@ -44,15 +49,32 @@ export function createLiveBridge(params: {
   ai: GoogleGenAI;
   initialVoice: string;
   mode: string;
+  language?: string;
+  currentDateText?: string;
+  initialUserLocation?: { lat: number; lng: number } | null;
   initialCamera?: boolean;
   authContext: ServerAuthContext;
   sendJson: (payload: unknown) => void;
   closeClient: () => void;
   onDone?: () => void;
 }): LiveBridgeController {
-  const { ai, mode, initialCamera = false, authContext, sendJson, closeClient, onDone } = params;
+  const {
+    ai,
+    mode,
+    language = 'id',
+    currentDateText,
+    initialUserLocation = null,
+    initialCamera = false,
+    authContext,
+    sendJson,
+    closeClient,
+    onDone,
+  } = params;
 
   let currentVoice: CanonicalVoiceId = normalizePersonaId(params.initialVoice);
+  let userLocation: { lat: number; lng: number } | null = initialUserLocation;
+  let pendingLocationResolvers: Array<(loc: { lat: number; lng: number } | null) => void> = [];
+  let preferExtendedThinking = false;
   const useSemiGaul = authContext.isAdmin || authContext.freewill.enabled;
   const includePrivateMemories =
     authContext.canAccessAdminMemories || authContext.freewill.enabled;
@@ -150,6 +172,9 @@ export function createLiveBridge(params: {
   let reconnectAttempts = 0;
   let pendingSwitchTarget: CanonicalVoiceId | null = null;
   let switchTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingEndSession = false;
+  let sawFarewellOutputSinceEndCall = false;
+  let endSessionTimer: ReturnType<typeof setTimeout> | null = null;
   let owieCaptionSentThisTurn = false;
   let lastOwieCaptionAt = 0;
   let owieRawBuffer = '';
@@ -173,6 +198,163 @@ export function createLiveBridge(params: {
       clearTimeout(switchTimer);
       switchTimer = null;
     }
+  };
+
+  const clearEndSessionTimer = () => {
+    if (endSessionTimer !== null) {
+      clearTimeout(endSessionTimer);
+      endSessionTimer = null;
+    }
+  };
+
+  const resolvePendingLocationWaiters = (loc: { lat: number; lng: number } | null) => {
+    const waiters = pendingLocationResolvers;
+    pendingLocationResolvers = [];
+    for (const resolve of waiters) {
+      resolve(loc);
+    }
+  };
+
+  const waitForUserLocation = (timeoutMs = 3500): Promise<{ lat: number; lng: number } | null> => {
+    if (userLocation) return Promise.resolve(userLocation);
+    sendJson({ requestLocation: true });
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingLocationResolvers = pendingLocationResolvers.filter((fn) => fn !== onResolved);
+        resolve(userLocation);
+      }, timeoutMs);
+      const onResolved = (loc: { lat: number; lng: number } | null) => {
+        clearTimeout(timer);
+        resolve(loc);
+      };
+      pendingLocationResolvers.push(onResolved);
+    });
+  };
+
+  const runLiveWebSearch = async (paramsSearch: {
+    query: string;
+    searchType?: string;
+    needsUserLocation?: boolean;
+  }): Promise<{
+    answer: string;
+    sources: Array<{ title: string; uri: string }>;
+    mapsUri?: string;
+    searchType: 'web' | 'places';
+  }> => {
+    const cleanQuery = paramsSearch.query.trim();
+    const isPlaces = paramsSearch.searchType === 'places';
+    const wantsTrafficOrRoute =
+      /\b(jarak|macet|kemacetan|lalu lintas|traffic|rute|route|arah|estimasi|waktu tempuh|berapa menit|berapa jam|terdekat|nearest|mall|mal|pusat perbelanjaan)\b/i.test(
+        cleanQuery
+      );
+
+    if ((paramsSearch.needsUserLocation || isPlaces) && !userLocation) {
+      await waitForUserLocation(3500);
+    }
+
+    const searchPrompt = [
+      `Pertanyaan pengguna: ${cleanQuery}`,
+      currentDateText ? `Waktu sekarang: ${currentDateText}.` : '',
+      userLocation
+        ? `Lokasi GPS pengguna saat ini: latitude ${userLocation.lat.toFixed(5)}, longitude ${userLocation.lng.toFixed(5)} (gunakan titik koordinat GPS ini sebagai asal pencarian terdekat/jarak/rute).`
+        : 'Lokasi GPS spesifik tidak tersedia; gunakan konteks area umum atau Tangerang/Jakarta jika relevan.',
+      'Berikan ringkasan fakta paling lengkap, akurat, langsung ke inti, beserta nama tempat terdekat, perkiraan jarak/waktu tempuh, alamat, atau kondisi rute/lalu lintas nyatanya secara ringkas agar langsung bisa dibacakan asisten suara (JANGAN menyuruh pengguna mencari sendiri).',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const runMapsQuery = () =>
+      ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: searchPrompt,
+        config: {
+          tools: [{ googleMaps: {} }],
+          ...(userLocation
+            ? {
+                toolConfig: {
+                  retrievalConfig: {
+                    latLng: {
+                      latitude: userLocation.lat,
+                      longitude: userLocation.lng,
+                    },
+                  },
+                },
+              }
+            : {}),
+          abortSignal: AbortSignal.timeout(18000),
+        },
+      });
+
+    const runSearchQuery = () =>
+      ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents: searchPrompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+          abortSignal: AbortSignal.timeout(18000),
+        },
+      });
+
+    const responsesToMerge: Array<Awaited<ReturnType<typeof runMapsQuery>>> = [];
+    if (isPlaces) {
+      if (wantsTrafficOrRoute) {
+        const [mapsRes, searchRes] = await Promise.allSettled([runMapsQuery(), runSearchQuery()]);
+        if (mapsRes.status === 'fulfilled') responsesToMerge.push(mapsRes.value);
+        if (searchRes.status === 'fulfilled') responsesToMerge.push(searchRes.value);
+        if (responsesToMerge.length === 0) {
+          throw (mapsRes.status === 'rejected' ? mapsRes.reason : new Error('Gagal mencari lokasi.'));
+        }
+      } else {
+        responsesToMerge.push(await runMapsQuery());
+      }
+    } else {
+      responsesToMerge.push(await runSearchQuery());
+    }
+
+    const sourcesMap = new Map<string, { title: string; uri: string }>();
+    const textParts: string[] = [];
+    let firstMapsUri: string | undefined;
+
+    for (const resp of responsesToMerge) {
+      const txt = (resp.text || '').trim();
+      if (txt) textParts.push(txt);
+      const chunks = resp.candidates?.[0]?.groundingMetadata?.groundingChunks;
+      if (Array.isArray(chunks)) {
+        for (const c of chunks) {
+          if (c?.web?.uri && !sourcesMap.has(c.web.uri)) {
+            sourcesMap.set(c.web.uri, {
+              title: (c.web.title || c.web.uri).trim(),
+              uri: c.web.uri,
+            });
+          }
+          if (c?.maps?.uri) {
+            if (!firstMapsUri) firstMapsUri = c.maps.uri;
+            if (!sourcesMap.has(c.maps.uri)) {
+              sourcesMap.set(c.maps.uri, {
+                title: (c.maps.title || 'Google Maps').trim(),
+                uri: c.maps.uri,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    const answer = textParts.join('\n\n').trim() || 'Informasi belum ditemukan.';
+    const sources = Array.from(sourcesMap.values()).slice(0, 6);
+    const mapsUri =
+      firstMapsUri ||
+      (isPlaces
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cleanQuery)}`
+        : undefined);
+
+    return {
+      answer,
+      sources,
+      mapsUri,
+      searchType: isPlaces ? 'places' : 'web',
+    };
   };
 
   const buildPhotoPrimerParts = (): Part[] => {
@@ -381,12 +563,17 @@ export function createLiveBridge(params: {
     if (closedByClient) return;
 
     currentVoice = targetVoice;
+    pendingEndSession = false;
+    sawFarewellOutputSinceEndCall = false;
+    clearEndSessionTimer();
     owieCaptionSentThisTurn = false;
     lastOwieCaptionAt = 0;
     owieRawBuffer = '';
     sessionPrimedPhotos = false;
 
     const sessionGen = ++activeSessionGeneration;
+    const useExtendedThinking = preferExtendedThinking;
+    const liveModel = useExtendedThinking ? 'gemini-3.8-live-extended-thinking' : 'gemini-3.8-live';
 
     const { voiceName, liveSystemInstruction, greetingPrompt, tools } =
       buildLivePersonaSessionConfig(targetVoice, mode, {
@@ -404,6 +591,10 @@ export function createLiveBridge(params: {
         handoffFrom,
         recentContext: recentTurns.join(' | '),
         customOpeningGreeting: !handoffFrom && !isReconnect ? customOpeningGreeting : undefined,
+        nonBlockingTools: useExtendedThinking,
+        language,
+        currentDateText,
+        userLocation,
       });
 
     const isStillCurrent = () => !closedByClient && sessionGen === activeSessionGeneration;
@@ -411,6 +602,7 @@ export function createLiveBridge(params: {
     let readySent = false;
     let sessionTerminatedEarly = false;
     let earlyTerminationMessage = '';
+    let earlyTerminationRaw = '';
 
     const emitReadyIfCurrent = () => {
       if (readySent || sessionTerminatedEarly || !activeSession || !isStillCurrent()) return;
@@ -424,357 +616,515 @@ export function createLiveBridge(params: {
       }
     };
 
-    const thisSession = await ai.live.connect({
-      model: 'gemini-3.8-live',
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName } },
+    let thisSession: LiveSession;
+    try {
+      thisSession = await ai.live.connect({
+        model: liveModel,
+        config: {
+          responseModalities: [Modality.AUDIO],
+          ...(useExtendedThinking
+            ? {
+                thinkingConfig: {
+                  thinkingLevel: ThinkingLevel.HIGH,
+                },
+              }
+            : {}),
+          speechConfig: {
+            voiceConfig: { prebuiltVoiceConfig: { voiceName } },
+          },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
+          systemInstruction: liveSystemInstruction,
+          tools,
         },
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
-        systemInstruction: liveSystemInstruction,
-        tools,
-      },
-      callbacks: {
-        onopen: () => {
-          if (!isStillCurrent() || sessionTerminatedEarly) return;
-          openNotified = true;
-          emitReadyIfCurrent();
-        },
-        onmessage: (message: LiveServerMessage) => {
-          if (!isStillCurrent()) return;
+        callbacks: {
+          onopen: () => {
+            if (!isStillCurrent() || sessionTerminatedEarly) return;
+            openNotified = true;
+            emitReadyIfCurrent();
+          },
+          onmessage: (message: LiveServerMessage) => {
+            if (!isStillCurrent()) return;
 
-          const toolCalls = message.toolCall?.functionCalls;
-          if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-            void (async () => {
-              const responses: Array<{
-                id?: string;
-                name?: string;
-                response: Record<string, unknown>;
-              }> = [];
+            const toolCalls = message.toolCall?.functionCalls;
+            if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+              void (async () => {
+                const responses: Array<{
+                  id?: string;
+                  name?: string;
+                  response: Record<string, unknown>;
+                  scheduling?: FunctionResponseScheduling;
+                }> = [];
 
-              for (const fc of toolCalls) {
-                const name = fc.name || '';
-                const args = (fc.args || {}) as Record<string, unknown>;
+                const attachScheduling = () =>
+                  useExtendedThinking ? { scheduling: FunctionResponseScheduling.WHEN_IDLE } : {};
 
-                try {
-                  if (name === 'switch_persona') {
-                    const requested = normalizePersonaId(String(args.targetPersona || ''));
-                    if (requested === currentVoice) {
-                      responses.push({
-                        id: fc.id,
-                        name,
-                        response: {
-                          ok: false,
-                          message: `Pengguna sudah berbicara dengan ${PERSONA_DISPLAY_NAMES[currentVoice]}.`,
-                        },
-                      });
-                    } else {
-                      pendingSwitchTarget = requested;
-                      clearSwitchTimer();
-                      switchTimer = setTimeout(() => {
-                        if (pendingSwitchTarget && !closedByClient) {
-                          void performPersonaHandoff(pendingSwitchTarget);
+                for (const fc of toolCalls) {
+                  const name = fc.name || '';
+                  const args = (fc.args || {}) as Record<string, unknown>;
+
+                  try {
+                    if (name === 'search_web') {
+                      const query = String(args.query || '').trim();
+                      const searchType = String(args.searchType || 'web');
+                      const needsUserLocation = Boolean(args.needsUserLocation);
+                      if (!query) {
+                        responses.push({
+                          id: fc.id,
+                          name,
+                          response: { ok: false, error: 'Query pencarian kosong.' },
+                          ...attachScheduling(),
+                        });
+                      } else {
+                        const result = await runLiveWebSearch({
+                          query,
+                          searchType,
+                          needsUserLocation,
+                        });
+                        pushRecentTurn(`Kartu di layar Live (${query}): ${result.answer.slice(0, 140)}`);
+                        sendJson({
+                          liveSearchCard: {
+                            query,
+                            summary: result.answer,
+                            searchType: result.searchType,
+                            sources: result.sources,
+                            mapsUri: result.mapsUri,
+                          },
+                        });
+                        responses.push({
+                          id: fc.id,
+                          name,
+                          response: {
+                            ok: true,
+                            displayedOnUserScreen: true,
+                            answer: result.answer,
+                            sources: result.sources,
+                            ...(result.mapsUri ? { mapsUri: result.mapsUri } : {}),
+                            instruction:
+                              'DATA REAL-TIME SUDAH DITERIMA DAN LANGSUNG DITAMPILKAN SEBAGAI KARTU DI LAYAR LIVE PENGGUNA. SEGERA bacakan dan jelaskan ringkasan jawabannya (tempat, jarak, rute, kondisi lalu lintas, atau fakta angkanya) secara langsung dan percaya diri sesuai kartu layar! Jangan pernah bilang tidak tahu, tidak bisa lihat layar, atau cek sendiri di Google Maps.',
+                          },
+                          ...attachScheduling(),
+                        });
+                      }
+                    } else if (name === 'switch_persona') {
+                      const requested = normalizePersonaId(String(args.targetPersona || ''));
+                      if (requested === currentVoice) {
+                        responses.push({
+                          id: fc.id,
+                          name,
+                          response: {
+                            ok: false,
+                            message: `Pengguna sudah berbicara dengan ${PERSONA_DISPLAY_NAMES[currentVoice]}.`,
+                          },
+                          ...attachScheduling(),
+                        });
+                      } else {
+                        pendingSwitchTarget = requested;
+                        clearSwitchTimer();
+                        switchTimer = setTimeout(() => {
+                          if (pendingSwitchTarget && !closedByClient) {
+                            void performPersonaHandoff(pendingSwitchTarget);
+                          }
+                        }, currentVoice === 'owie' ? 2200 : 5200);
+                        responses.push({
+                          id: fc.id,
+                          name,
+                          response: {
+                            ok: true,
+                            targetPersona: PERSONA_DISPLAY_NAMES[requested],
+                            instruction:
+                              currentVoice === 'owie'
+                                ? `Panggil owie_caption bahwa Owie akan memanggilkan ${PERSONA_DISPLAY_NAMES[requested]}, lalu akhiri giliranmu singkat.`
+                                : useSemiGaul
+                                ? `Ucapkan sekarang dengan gaya semi-gaul lu/gua menggunakan suaramu sendiri bahwa kamu mau memanggilkan ${PERSONA_DISPLAY_NAMES[requested]} (misalnya: "Oke tunggu bentar ya, gua panggilin ${PERSONA_DISPLAY_NAMES[requested]} dulu nih!").`
+                                : `Ucapkan sekarang dengan singkat dan ramah menggunakan suaramu sendiri bahwa kamu akan memanggilkan ${PERSONA_DISPLAY_NAMES[requested]} (misalnya: "Ok tunggu sebentar, akan saya panggilkan ${PERSONA_DISPLAY_NAMES[requested]}").`,
+                          },
+                          ...attachScheduling(),
+                        });
+                      }
+                    } else if (name === 'end_live_session') {
+                      pendingEndSession = true;
+                      sawFarewellOutputSinceEndCall = false;
+                      clearEndSessionTimer();
+                      sendJson({ endingSession: true });
+                      endSessionTimer = setTimeout(() => {
+                        if (pendingEndSession && !closedByClient) {
+                          pendingEndSession = false;
+                          sawFarewellOutputSinceEndCall = false;
+                          sendJson({ endSessionWhenAudioDone: true });
                         }
-                      }, currentVoice === 'owie' ? 2200 : 5200);
+                      }, 7500);
                       responses.push({
                         id: fc.id,
                         name,
                         response: {
                           ok: true,
-                          targetPersona: PERSONA_DISPLAY_NAMES[requested],
+                          closingAfterReply: true,
                           instruction:
                             currentVoice === 'owie'
-                              ? `Panggil owie_caption bahwa Owie akan memanggilkan ${PERSONA_DISPLAY_NAMES[requested]}, lalu akhiri giliranmu singkat.`
+                              ? `Panggil owie_caption dengan salam perpisahan singkat dan ramah dalam Bahasa Indonesia (jika belum), lalu tutup dengan "Guk!". Setelah giliranmu selesai, sesi Live akan otomatis dimatikan.`
                               : useSemiGaul
-                              ? `Ucapkan sekarang dengan gaya semi-gaul lu/gua menggunakan suaramu sendiri bahwa kamu mau memanggilkan ${PERSONA_DISPLAY_NAMES[requested]} (misalnya: "Oke tunggu bentar ya, gua panggilin ${PERSONA_DISPLAY_NAMES[requested]} dulu nih!").`
-                              : `Ucapkan sekarang dengan singkat dan ramah menggunakan suaramu sendiri bahwa kamu akan memanggilkan ${PERSONA_DISPLAY_NAMES[requested]} (misalnya: "Ok tunggu sebentar, akan saya panggilkan ${PERSONA_DISPLAY_NAMES[requested]}").`,
+                              ? `Ucapkan salam perpisahan singkat dan santai pakai gayamu (misalnya: "Oke siap, dadah! Kapan-kapan ngobrol lagi ya!"), lalu akhiri giliranmu. Sesi Live akan otomatis dimatikan setelah kamu selesai berbicara.`
+                              : `Ucapkan salam perpisahan singkat yang hangat dan ramah sesuai bahasa pengguna (misalnya: "Baik, terima kasih sudah mengobrol! Sampai jumpa lagi ya!"), lalu akhiri giliranmu. Sesi Live akan otomatis dimatikan setelah kamu selesai berbicara.`,
                         },
+                        ...attachScheduling(),
+                      });
+                    } else if (name === 'owie_caption') {
+                      const replyText = String(args.indonesian_reply || '').trim();
+                      if (replyText) {
+                        owieCaptionSentThisTurn = true;
+                        if (pendingEndSession) {
+                          sawFarewellOutputSinceEndCall = true;
+                        }
+                        lastOwieCaptionAt = Date.now();
+                        pushRecentTurn(`Topik Owie: ${replyText}`);
+                        sendJson({
+                          outputTranscript: replyText,
+                          fromOwieCaption: true,
+                          owieBark: true,
+                          voice: 'owie',
+                        });
+                      }
+                      responses.push({
+                        id: fc.id,
+                        name,
+                        response: {
+                          ok: true,
+                          captionDisplayed: true,
+                          barkPlayed: true,
+                          nextStep:
+                            "Teks jawaban sudah tampil di layar dan suara gonggongan Chihuahua asli sudah diputar. Selesaikan giliranmu sekarang dengan singkat ('Guk!').",
+                        },
+                        ...attachScheduling(),
+                      });
+                    } else if (name === 'save_admin_memory') {
+                      if (canUseAdminMemories && authContext.idToken && authContext.uid) {
+                        const title = String(args.title || 'Pengingat Admin').trim();
+                        const content = String(args.content || '').trim();
+                        const saved = await saveAdminMemoryServer({
+                          idToken: authContext.idToken,
+                          uid: authContext.uid,
+                          email: authContext.email || '',
+                          title,
+                          content,
+                        });
+                        if (saved.ok && saved.memory) {
+                          adminMemories.push(saved.memory);
+                          sendJson({
+                            memoryAction: { type: 'saved', detail: saved.memory.title },
+                          });
+                        }
+                        responses.push({
+                          id: fc.id,
+                          name,
+                          response: saved.ok
+                            ? { ok: true, title: saved.memory?.title }
+                            : { ok: false, error: saved.error },
+                          ...attachScheduling(),
+                        });
+                      } else {
+                        responses.push({
+                          id: fc.id,
+                          name,
+                          response: {
+                            ok: false,
+                            error: 'Khusus akun Admin, Admin+, atau Admin Utama terverifikasi.',
+                          },
+                          ...attachScheduling(),
+                        });
+                      }
+                    } else if (name === 'delete_admin_memory') {
+                      if (canUseAdminMemories && authContext.idToken) {
+                        const keyword = String(args.keyword || '').trim();
+                        const deleted = await deleteAdminMemoriesByKeywordServer({
+                          idToken: authContext.idToken,
+                          keyword,
+                        });
+                        if (deleted.ok && deleted.deletedTitles.length > 0) {
+                          const lowerDeleted = deleted.deletedTitles.map((t) => t.toLowerCase());
+                          for (let i = adminMemories.length - 1; i >= 0; i--) {
+                            if (lowerDeleted.includes(adminMemories[i].title.toLowerCase())) {
+                              adminMemories.splice(i, 1);
+                            }
+                          }
+                          sendJson({
+                            memoryAction: {
+                              type: 'deleted',
+                              detail: deleted.deletedTitles.join(', '),
+                            },
+                          });
+                        }
+                        responses.push({
+                          id: fc.id,
+                          name,
+                          response: deleted.ok
+                            ? { ok: true, deletedTitles: deleted.deletedTitles }
+                            : { ok: false, error: deleted.error },
+                          ...attachScheduling(),
+                        });
+                      } else {
+                        responses.push({
+                          id: fc.id,
+                          name,
+                          response: {
+                            ok: false,
+                            error: 'Khusus akun Admin, Admin+, atau Admin Utama terverifikasi.',
+                          },
+                          ...attachScheduling(),
+                        });
+                      }
+                    } else if (name === 'save_public_memory') {
+                      if (canManagePublicMemories && authContext.idToken && authContext.uid) {
+                        const title = String(args.title || 'Pengingat Umum').trim();
+                        const content = String(args.content || '').trim();
+                        const saved = await savePublicMemoryServer({
+                          idToken: authContext.idToken,
+                          uid: authContext.uid,
+                          title,
+                          content,
+                        });
+                        if (saved.ok && saved.memory) {
+                          publicMemories.push(saved.memory);
+                          sendJson({
+                            memoryAction: { type: 'saved', detail: saved.memory.title },
+                          });
+                        }
+                        responses.push({
+                          id: fc.id,
+                          name,
+                          response: saved.ok
+                            ? { ok: true, title: saved.memory?.title }
+                            : { ok: false, error: saved.error },
+                          ...attachScheduling(),
+                        });
+                      } else {
+                        responses.push({
+                          id: fc.id,
+                          name,
+                          response: {
+                            ok: false,
+                            error: 'Khusus akun Admin terverifikasi ke atas.',
+                          },
+                          ...attachScheduling(),
+                        });
+                      }
+                    } else if (name === 'delete_public_memory') {
+                      if (canManagePublicMemories && authContext.idToken) {
+                        const keyword = String(args.keyword || '').trim();
+                        const deleted = await deletePublicMemoriesByKeywordServer({
+                          idToken: authContext.idToken,
+                          keyword,
+                        });
+                        if (deleted.ok && deleted.deletedTitles.length > 0) {
+                          const lowerDeleted = deleted.deletedTitles.map((t) => t.toLowerCase());
+                          for (let i = publicMemories.length - 1; i >= 0; i--) {
+                            if (lowerDeleted.includes(publicMemories[i].title.toLowerCase())) {
+                              publicMemories.splice(i, 1);
+                            }
+                          }
+                          sendJson({
+                            memoryAction: {
+                              type: 'deleted',
+                              detail: deleted.deletedTitles.join(', '),
+                            },
+                          });
+                        }
+                        responses.push({
+                          id: fc.id,
+                          name,
+                          response: deleted.ok
+                            ? { ok: true, deletedTitles: deleted.deletedTitles }
+                            : { ok: false, error: deleted.error },
+                          ...attachScheduling(),
+                        });
+                      } else {
+                        responses.push({
+                          id: fc.id,
+                          name,
+                          response: {
+                            ok: false,
+                            error: 'Khusus akun Admin terverifikasi ke atas.',
+                          },
+                          ...attachScheduling(),
+                        });
+                      }
+                    } else {
+                      responses.push({
+                        id: fc.id,
+                        name,
+                        response: { ok: false, error: `Fungsi ${name} tidak dikenali.` },
+                        ...attachScheduling(),
                       });
                     }
-                  } else if (name === 'owie_caption') {
-                    const replyText = String(args.indonesian_reply || '').trim();
-                    if (replyText) {
-                      owieCaptionSentThisTurn = true;
-                      lastOwieCaptionAt = Date.now();
-                      pushRecentTurn(`Topik Owie: ${replyText}`);
-                      sendJson({
-                        outputTranscript: replyText,
-                        fromOwieCaption: true,
-                        owieBark: true,
-                        voice: 'owie',
-                      });
-                    }
+                  } catch (toolErr) {
                     responses.push({
                       id: fc.id,
                       name,
                       response: {
-                        ok: true,
-                        captionDisplayed: true,
-                        barkPlayed: true,
-                        nextStep:
-                          "Teks jawaban sudah tampil di layar dan suara gonggongan Chihuahua asli sudah diputar. Selesaikan giliranmu sekarang dengan singkat ('Guk!').",
+                        ok: false,
+                        error:
+                          toolErr instanceof Error
+                            ? toolErr.message
+                            : 'Terjadi kesalahan saat menjalankan aksi.',
                       },
-                    });
-                  } else if (name === 'save_admin_memory') {
-                    if (canUseAdminMemories && authContext.idToken && authContext.uid) {
-                      const title = String(args.title || 'Pengingat Admin').trim();
-                      const content = String(args.content || '').trim();
-                      const saved = await saveAdminMemoryServer({
-                        idToken: authContext.idToken,
-                        uid: authContext.uid,
-                        email: authContext.email || '',
-                        title,
-                        content,
-                      });
-                      if (saved.ok && saved.memory) {
-                        adminMemories.push(saved.memory);
-                        sendJson({
-                          memoryAction: { type: 'saved', detail: saved.memory.title },
-                        });
-                      }
-                      responses.push({
-                        id: fc.id,
-                        name,
-                        response: saved.ok
-                          ? { ok: true, title: saved.memory?.title }
-                          : { ok: false, error: saved.error },
-                      });
-                    } else {
-                      responses.push({
-                        id: fc.id,
-                        name,
-                        response: {
-                          ok: false,
-                          error: 'Khusus akun Admin, Admin+, atau Admin Utama terverifikasi.',
-                        },
-                      });
-                    }
-                  } else if (name === 'delete_admin_memory') {
-                    if (canUseAdminMemories && authContext.idToken) {
-                      const keyword = String(args.keyword || '').trim();
-                      const deleted = await deleteAdminMemoriesByKeywordServer({
-                        idToken: authContext.idToken,
-                        keyword,
-                      });
-                      if (deleted.ok && deleted.deletedTitles.length > 0) {
-                        const lowerDeleted = deleted.deletedTitles.map((t) => t.toLowerCase());
-                        for (let i = adminMemories.length - 1; i >= 0; i--) {
-                          if (lowerDeleted.includes(adminMemories[i].title.toLowerCase())) {
-                            adminMemories.splice(i, 1);
-                          }
-                        }
-                        sendJson({
-                          memoryAction: {
-                            type: 'deleted',
-                            detail: deleted.deletedTitles.join(', '),
-                          },
-                        });
-                      }
-                      responses.push({
-                        id: fc.id,
-                        name,
-                        response: deleted.ok
-                          ? { ok: true, deletedTitles: deleted.deletedTitles }
-                          : { ok: false, error: deleted.error },
-                      });
-                    } else {
-                      responses.push({
-                        id: fc.id,
-                        name,
-                        response: {
-                          ok: false,
-                          error: 'Khusus akun Admin, Admin+, atau Admin Utama terverifikasi.',
-                        },
-                      });
-                    }
-                  } else if (name === 'save_public_memory') {
-                    if (canManagePublicMemories && authContext.idToken && authContext.uid) {
-                      const title = String(args.title || 'Pengingat Umum').trim();
-                      const content = String(args.content || '').trim();
-                      const saved = await savePublicMemoryServer({
-                        idToken: authContext.idToken,
-                        uid: authContext.uid,
-                        title,
-                        content,
-                      });
-                      if (saved.ok && saved.memory) {
-                        publicMemories.push(saved.memory);
-                        sendJson({
-                          memoryAction: { type: 'saved', detail: saved.memory.title },
-                        });
-                      }
-                      responses.push({
-                        id: fc.id,
-                        name,
-                        response: saved.ok
-                          ? { ok: true, title: saved.memory?.title }
-                          : { ok: false, error: saved.error },
-                      });
-                    } else {
-                      responses.push({
-                        id: fc.id,
-                        name,
-                        response: {
-                          ok: false,
-                          error: 'Khusus akun Admin terverifikasi ke atas.',
-                        },
-                      });
-                    }
-                  } else if (name === 'delete_public_memory') {
-                    if (canManagePublicMemories && authContext.idToken) {
-                      const keyword = String(args.keyword || '').trim();
-                      const deleted = await deletePublicMemoriesByKeywordServer({
-                        idToken: authContext.idToken,
-                        keyword,
-                      });
-                      if (deleted.ok && deleted.deletedTitles.length > 0) {
-                        const lowerDeleted = deleted.deletedTitles.map((t) => t.toLowerCase());
-                        for (let i = publicMemories.length - 1; i >= 0; i--) {
-                          if (lowerDeleted.includes(publicMemories[i].title.toLowerCase())) {
-                            publicMemories.splice(i, 1);
-                          }
-                        }
-                        sendJson({
-                          memoryAction: {
-                            type: 'deleted',
-                            detail: deleted.deletedTitles.join(', '),
-                          },
-                        });
-                      }
-                      responses.push({
-                        id: fc.id,
-                        name,
-                        response: deleted.ok
-                          ? { ok: true, deletedTitles: deleted.deletedTitles }
-                          : { ok: false, error: deleted.error },
-                      });
-                    } else {
-                      responses.push({
-                        id: fc.id,
-                        name,
-                        response: {
-                          ok: false,
-                          error: 'Khusus akun Admin terverifikasi ke atas.',
-                        },
-                      });
-                    }
-                  } else {
-                    responses.push({
-                      id: fc.id,
-                      name,
-                      response: { ok: false, error: `Fungsi ${name} tidak dikenali.` },
+                      ...attachScheduling(),
                     });
                   }
-                } catch (toolErr) {
-                  responses.push({
-                    id: fc.id,
-                    name,
-                    response: {
-                      ok: false,
-                      error:
-                        toolErr instanceof Error
-                          ? toolErr.message
-                          : 'Terjadi kesalahan saat menjalankan aksi.',
-                    },
-                  });
                 }
-              }
 
-              if (responses.length > 0 && isStillCurrent()) {
-                try {
-                  thisSession.sendToolResponse({ functionResponses: responses });
-                } catch {
-                  // Ignore tool response send failure on closing session
+                if (responses.length > 0 && isStillCurrent()) {
+                  try {
+                    thisSession.sendToolResponse({ functionResponses: responses });
+                  } catch {
+                    // Ignore tool response send failure on closing session
+                  }
                 }
-              }
-            })();
-          }
-
-          const content = message.serverContent;
-          if (content?.inputTranscription?.text) {
-            pushRecentTurn(`Pengguna: ${content.inputTranscription.text}`);
-            sendJson({ inputTranscript: content.inputTranscription.text });
-          }
-
-          if (content?.outputTranscription?.text) {
-            reconnectAttempts = 0;
-            if (currentVoice === 'owie') {
-              owieRawBuffer += content.outputTranscription.text;
-            } else {
-              pushRecentTurn(`Topik: ${content.outputTranscription.text}`);
-              sendJson({
-                outputTranscript: content.outputTranscription.text,
-                voice: currentVoice,
-              });
+              })();
             }
-          }
 
-          for (const part of content?.modelTurn?.parts ?? []) {
-            if (part.inlineData?.data && currentVoice !== 'owie') {
+            const content = message.serverContent;
+            if (content?.inputTranscription?.text) {
+              pushRecentTurn(`Pengguna: ${content.inputTranscription.text}`);
+              sendJson({ inputTranscript: content.inputTranscription.text });
+            }
+
+            if (content?.outputTranscription?.text) {
               reconnectAttempts = 0;
-              sendJson({ audio: part.inlineData.data, voice: currentVoice });
-            }
-          }
-
-          if (content?.interrupted) {
-            sendJson({ interrupted: true });
-          }
-
-          if (content?.turnComplete) {
-            if (currentVoice === 'owie') {
-              const recentlyCaptioned = Date.now() - lastOwieCaptionAt < 12000;
-              if (!owieCaptionSentThisTurn && !recentlyCaptioned && owieRawBuffer.trim()) {
+              if (pendingEndSession) {
+                sawFarewellOutputSinceEndCall = true;
+              }
+              if (currentVoice === 'owie') {
+                owieRawBuffer += content.outputTranscription.text;
+              } else {
+                pushRecentTurn(`Topik: ${content.outputTranscription.text}`);
                 sendJson({
-                  outputTranscript: owieRawBuffer.trim(),
-                  fromOwieCaption: true,
-                  owieBark: true,
-                  voice: 'owie',
+                  outputTranscript: content.outputTranscription.text,
+                  voice: currentVoice,
                 });
               }
-              owieCaptionSentThisTurn = false;
-              owieRawBuffer = '';
             }
-            sendJson({ turnComplete: true });
 
-            if (pendingSwitchTarget && !isSwapping && !closedByClient) {
-              const target = pendingSwitchTarget;
-              void performPersonaHandoff(target);
+            for (const part of content?.modelTurn?.parts ?? []) {
+              if (part.inlineData?.data && currentVoice !== 'owie') {
+                reconnectAttempts = 0;
+                if (pendingEndSession) {
+                  sawFarewellOutputSinceEndCall = true;
+                }
+                sendJson({ audio: part.inlineData.data, voice: currentVoice });
+              }
             }
-          }
+
+            if (content?.interrupted) {
+              sendJson({ interrupted: true });
+            }
+
+            const interactionDone =
+              content?.turnComplete ||
+              (useExtendedThinking && content?.interactionStatus === InteractionStatus.IDLE);
+
+            if (content?.turnComplete) {
+              if (currentVoice === 'owie') {
+                const recentlyCaptioned = Date.now() - lastOwieCaptionAt < 12000;
+                if (!owieCaptionSentThisTurn && !recentlyCaptioned && owieRawBuffer.trim()) {
+                  if (pendingEndSession) {
+                    sawFarewellOutputSinceEndCall = true;
+                  }
+                  sendJson({
+                    outputTranscript: owieRawBuffer.trim(),
+                    fromOwieCaption: true,
+                    owieBark: true,
+                    voice: 'owie',
+                  });
+                }
+                owieCaptionSentThisTurn = false;
+                owieRawBuffer = '';
+              }
+              sendJson({ turnComplete: true });
+
+              if (pendingEndSession && sawFarewellOutputSinceEndCall && !closedByClient) {
+                pendingEndSession = false;
+                sawFarewellOutputSinceEndCall = false;
+                clearEndSessionTimer();
+                sendJson({ endSessionWhenAudioDone: true });
+              } else if (pendingSwitchTarget && !isSwapping && !closedByClient) {
+                const target = pendingSwitchTarget;
+                void performPersonaHandoff(target);
+              }
+            } else if (interactionDone) {
+              sendJson({ turnComplete: true });
+              if (pendingEndSession && sawFarewellOutputSinceEndCall && !closedByClient) {
+                pendingEndSession = false;
+                sawFarewellOutputSinceEndCall = false;
+                clearEndSessionTimer();
+                sendJson({ endSessionWhenAudioDone: true });
+              }
+            }
+          },
+          onerror: (errEvent: unknown) => {
+            if (!isStillCurrent()) return;
+            const ev = errEvent as { message?: string; error?: { message?: string } };
+            const rawDetail = ev?.error?.message || ev?.message || String(errEvent);
+            const info = formatLiveCloseInfo(undefined, rawDetail);
+            if (!readySent) {
+              sessionTerminatedEarly = true;
+              earlyTerminationMessage = info.message;
+              earlyTerminationRaw = rawDetail;
+              return;
+            }
+            if (isSwapping || isReconnecting) return;
+            void attemptAutoReconnect(info.message, info.retryable);
+          },
+          onclose: (closeEvent: unknown) => {
+            if (!isStillCurrent()) return;
+            const ce = closeEvent as { code?: number; reason?: string };
+            const info = formatLiveCloseInfo(ce?.code, ce?.reason);
+            if (!readySent) {
+              sessionTerminatedEarly = true;
+              earlyTerminationMessage = info.message;
+              earlyTerminationRaw = `${ce?.code || ''} ${ce?.reason || ''}`;
+              return;
+            }
+            if (isSwapping || isReconnecting) return;
+            void attemptAutoReconnect(info.message, info.retryable);
+          },
         },
-        onerror: (errEvent: unknown) => {
-          if (!isStillCurrent()) return;
-          const ev = errEvent as { message?: string; error?: { message?: string } };
-          const rawDetail = ev?.error?.message || ev?.message || String(errEvent);
-          const info = formatLiveCloseInfo(undefined, rawDetail);
-          if (!readySent) {
-            sessionTerminatedEarly = true;
-            earlyTerminationMessage = info.message;
-          }
-          if (isSwapping || isReconnecting) return;
-          void attemptAutoReconnect(info.message, info.retryable);
-        },
-        onclose: (closeEvent: unknown) => {
-          if (!isStillCurrent()) return;
-          const ce = closeEvent as { code?: number; reason?: string };
-          const info = formatLiveCloseInfo(ce?.code, ce?.reason);
-          if (!readySent) {
-            sessionTerminatedEarly = true;
-            earlyTerminationMessage = info.message;
-          }
-          if (isSwapping || isReconnecting) return;
-          void attemptAutoReconnect(info.message, info.retryable);
-        },
-      },
-    });
+      });
+    } catch (connectErr) {
+      if (useExtendedThinking && !closedByClient) {
+        const msgStr = connectErr instanceof Error ? connectErr.message : String(connectErr);
+        const lower = msgStr.toLowerCase();
+        const isQuotaOrKey =
+          lower.includes('resource_exhausted') ||
+          lower.includes('quota') ||
+          lower.includes('api_key') ||
+          lower.includes('api key');
+        if (!isQuotaOrKey) {
+          preferExtendedThinking = false;
+          await connectPersonaSession(targetVoice, handoffFrom, isReconnect);
+          return;
+        }
+      }
+      throw connectErr;
+    }
 
     if (!isStillCurrent() || sessionTerminatedEarly) {
       try {
         thisSession.close();
       } catch {
         // Ignore close error
+      }
+      if (useExtendedThinking && sessionTerminatedEarly && !closedByClient) {
+        const lowerEarly = earlyTerminationRaw.toLowerCase();
+        const isQuotaOrKey =
+          lowerEarly.includes('resource_exhausted') ||
+          lowerEarly.includes('quota') ||
+          lowerEarly.includes('api_key') ||
+          lowerEarly.includes('api key');
+        if (!isQuotaOrKey) {
+          preferExtendedThinking = false;
+          await connectPersonaSession(targetVoice, handoffFrom, isReconnect);
+          return;
+        }
       }
       if (sessionTerminatedEarly && earlyTerminationMessage) {
         throw new Error(earlyTerminationMessage);
@@ -840,6 +1190,17 @@ export function createLiveBridge(params: {
         return;
       }
 
+      if (msg.location && typeof msg.location.lat === 'number' && typeof msg.location.lng === 'number') {
+        userLocation = { lat: msg.location.lat, lng: msg.location.lng };
+        resolvePendingLocationWaiters(userLocation);
+        return;
+      }
+
+      if (msg.locationDenied) {
+        resolvePendingLocationWaiters(null);
+        return;
+      }
+
       if (msg.switchVoice) {
         const requested = normalizePersonaId(msg.switchVoice);
         if (requested !== currentVoice && !isSwapping) {
@@ -857,7 +1218,11 @@ export function createLiveBridge(params: {
       closedByClient = true;
       activeSessionGeneration += 1;
       clearSwitchTimer();
+      clearEndSessionTimer();
+      resolvePendingLocationWaiters(null);
       pendingSwitchTarget = null;
+      pendingEndSession = false;
+      sawFarewellOutputSinceEndCall = false;
       const s = activeSession;
       activeSession = null;
       try {

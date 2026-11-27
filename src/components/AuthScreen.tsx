@@ -303,6 +303,57 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
               </div>
             )}
 
+            {/* Social Providers: Google & Apple */}
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={() => void handleGoogleSignIn()}
+                className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3.5 text-xs font-semibold text-zinc-800 hover:border-blue-500/50 hover:bg-blue-50/40 dark:border-[#293456] dark:bg-[#171E33] dark:text-zinc-100 dark:hover:bg-[#1E2742] disabled:opacity-60 transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="#EA4335"
+                    d="M12 10.2v3.9h5.4c-.2 1.3-1.5 3.8-5.4 3.8-3.3 0-5.9-2.7-5.9-6s2.7-6 5.9-6c1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.8 3.4 14.6 2.5 12 2.5 6.8 2.5 2.5 6.8 2.5 12s4.3 9.5 9.5 9.5c5.5 0 9.1-3.9 9.1-9.3 0-.6-.1-1.1-.2-1.6H12z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M3.6 7.3l3.2 2.3C7.7 7.7 9.7 6.5 12 6.5c1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.8 3.4 14.6 2.5 12 2.5 8.3 2.5 5.1 4.6 3.6 7.3z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M12 21.5c2.6 0 4.8-.9 6.4-2.4l-3-2.5c-.8.6-1.9 1-3.4 1-2.6 0-4.9-1.8-5.7-4.2l-3.2 2.5C4.7 19.2 8.1 21.5 12 21.5z"
+                  />
+                  <path
+                    fill="#4285F4"
+                    d="M21.1 12.2c0-.6-.1-1.1-.2-1.6H12v3.9h5.4c-.3 1.4-1.1 2.5-2.1 3.1l3 2.5c1.8-1.6 2.8-4.1 2.8-7.9z"
+                  />
+                </svg>
+                <span>{loadingMethod === 'google' ? t.auth.connecting : 'Google'}</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={() => void handleAppleSignIn()}
+                className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-zinc-900 px-3.5 text-xs font-semibold text-white hover:bg-zinc-800 dark:border-[#293456] dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100 disabled:opacity-60 transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <svg className="h-4 w-4 shrink-0 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M16.365 1.43c0 1.14-.493 2.27-1.177 3.08-.744.9-1.99 1.57-2.987 1.57-.12 0-.23-.02-.3-.03-.01-.06-.04-.22-.04-.39 0-1.15.572-2.27 1.206-2.98.804-.94 2.142-1.64 3.248-1.68.03.13.05.28.05.43zm4.565 15.71c-.03.07-.463 1.58-1.518 3.12-.945 1.34-1.94 2.71-3.43 2.71-1.517 0-1.9-.88-3.63-.88-1.698 0-2.302.91-3.67.91-1.377 0-2.332-1.26-3.428-2.8-1.287-1.82-2.323-4.63-2.323-7.28 0-4.28 2.797-6.55 5.552-6.55 1.448 0 2.675.95 3.6.95.865 0 2.222-1.01 3.902-1.01.613 0 2.886.06 4.374 2.19-.13.09-2.383 1.37-2.383 4.19 0 3.26 2.854 4.42 2.955 4.45z" />
+                </svg>
+                <span>{loadingMethod === 'apple' ? t.auth.connecting : 'Apple'}</span>
+              </button>
+            </div>
+
+            {/* Divider */}
+            <div className="relative flex items-center py-0.5">
+              <div className="flex-grow border-t border-zinc-200 dark:border-[#242C44]" />
+              <span className="mx-3 shrink-0 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                {t.auth.orContinueWith}
+              </span>
+              <div className="flex-grow border-t border-zinc-200 dark:border-[#242C44]" />
+            </div>
+
             {/* Email & Password Form */}
             <form onSubmit={(e) => void handleEmailSubmit(e)} className="space-y-3.5">
               {tab === 'register' && (
@@ -407,57 +458,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ isDark, onToggleTheme, o
                   : t.auth.registerAccount}
               </button>
             </form>
-
-            {/* Divider */}
-            <div className="relative flex items-center py-0.5">
-              <div className="flex-grow border-t border-zinc-200 dark:border-[#242C44]" />
-              <span className="mx-3 shrink-0 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-                {t.auth.orContinueWith}
-              </span>
-              <div className="flex-grow border-t border-zinc-200 dark:border-[#242C44]" />
-            </div>
-
-            {/* Social Providers: Google & Apple */}
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-              <button
-                type="button"
-                disabled={isBusy}
-                onClick={() => void handleGoogleSignIn()}
-                className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3.5 text-xs font-semibold text-zinc-800 hover:border-blue-500/50 hover:bg-blue-50/40 dark:border-[#293456] dark:bg-[#171E33] dark:text-zinc-100 dark:hover:bg-[#1E2742] disabled:opacity-60 transition-colors cursor-pointer whitespace-nowrap"
-              >
-                <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    fill="#EA4335"
-                    d="M12 10.2v3.9h5.4c-.2 1.3-1.5 3.8-5.4 3.8-3.3 0-5.9-2.7-5.9-6s2.7-6 5.9-6c1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.8 3.4 14.6 2.5 12 2.5 6.8 2.5 2.5 6.8 2.5 12s4.3 9.5 9.5 9.5c5.5 0 9.1-3.9 9.1-9.3 0-.6-.1-1.1-.2-1.6H12z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M3.6 7.3l3.2 2.3C7.7 7.7 9.7 6.5 12 6.5c1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.8 3.4 14.6 2.5 12 2.5 8.3 2.5 5.1 4.6 3.6 7.3z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M12 21.5c2.6 0 4.8-.9 6.4-2.4l-3-2.5c-.8.6-1.9 1-3.4 1-2.6 0-4.9-1.8-5.7-4.2l-3.2 2.5C4.7 19.2 8.1 21.5 12 21.5z"
-                  />
-                  <path
-                    fill="#4285F4"
-                    d="M21.1 12.2c0-.6-.1-1.1-.2-1.6H12v3.9h5.4c-.3 1.4-1.1 2.5-2.1 3.1l3 2.5c1.8-1.6 2.8-4.1 2.8-7.9z"
-                  />
-                </svg>
-                <span>{loadingMethod === 'google' ? t.auth.connecting : 'Google'}</span>
-              </button>
-
-              <button
-                type="button"
-                disabled={isBusy}
-                onClick={() => void handleAppleSignIn()}
-                className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-zinc-900 px-3.5 text-xs font-semibold text-white hover:bg-zinc-800 dark:border-[#293456] dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100 disabled:opacity-60 transition-colors cursor-pointer whitespace-nowrap"
-              >
-                <svg className="h-4 w-4 shrink-0 fill-current" viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M16.365 1.43c0 1.14-.493 2.27-1.177 3.08-.744.9-1.99 1.57-2.987 1.57-.12 0-.23-.02-.3-.03-.01-.06-.04-.22-.04-.39 0-1.15.572-2.27 1.206-2.98.804-.94 2.142-1.64 3.248-1.68.03.13.05.28.05.43zm4.565 15.71c-.03.07-.463 1.58-1.518 3.12-.945 1.34-1.94 2.71-3.43 2.71-1.517 0-1.9-.88-3.63-.88-1.698 0-2.302.91-3.67.91-1.377 0-2.332-1.26-3.428-2.8-1.287-1.82-2.323-4.63-2.323-7.28 0-4.28 2.797-6.55 5.552-6.55 1.448 0 2.675.95 3.6.95.865 0 2.222-1.01 3.902-1.01.613 0 2.886.06 4.374 2.19-.13.09-2.383 1.37-2.383 4.19 0 3.26 2.854 4.42 2.955 4.45z" />
-                </svg>
-                <span>{loadingMethod === 'apple' ? t.auth.connecting : 'Apple'}</span>
-              </button>
-            </div>
           </div>
         </div>
       </div>

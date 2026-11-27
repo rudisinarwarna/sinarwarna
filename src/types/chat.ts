@@ -12,12 +12,18 @@ export interface ImageAttachment {
   previewUrl: string;
 }
 
+export interface WebSource {
+  title: string;
+  uri: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'model';
   text: string;
   attachments?: ImageAttachment[];
   attachmentNames?: string[];
+  sources?: WebSource[];
   createdAt: number;
   error?: string;
 }

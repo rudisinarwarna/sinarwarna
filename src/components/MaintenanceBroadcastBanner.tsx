@@ -167,7 +167,7 @@ export const MaintenanceBroadcastBanner: React.FC<MaintenanceBroadcastBannerProp
                   <label className="font-semibold text-zinc-600 dark:text-zinc-400">
                     {messages.adminRawErrorLabel}
                   </label>
-                  <pre className="max-h-48 overflow-y-auto rounded-2xl border border-red-300 dark:border-red-500/30 bg-zinc-950 p-3.5 font-mono text-xs text-red-300 whitespace-pre-wrap break-words">
+                  <pre className="max-h-48 overflow-y-auto rounded-2xl border border-red-300 dark:border-red-500/30 bg-red-50/90 dark:bg-zinc-950 p-3.5 font-mono text-xs text-red-900 dark:text-red-300 whitespace-pre-wrap break-words">
                     {maintenance.rawError || maintenance.reason || messages.adminRawErrorFallback}
                   </pre>
                 </div>

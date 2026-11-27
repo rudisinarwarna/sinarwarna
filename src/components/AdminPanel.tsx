@@ -10,6 +10,7 @@ import {
   Globe,
   ImagePlus,
   Mic,
+  Moon,
   Plus,
   RotateCcw,
   AlertTriangle,
@@ -19,6 +20,7 @@ import {
   ShieldAlert,
   ShieldOff,
   Sparkles,
+  Sun,
   Trash2,
   UserCheck,
   Users,
@@ -39,6 +41,8 @@ import {
   deleteAdminMemory,
   deletePublicMemory,
   deleteUserAccount,
+  readCachedAdminDefaultTheme,
+  saveDefaultThemeConfig,
   saveLiveOpeningGreeting,
   seedDefaultAdminMemoriesOnce,
   setFreewillMode,
@@ -47,11 +51,13 @@ import {
   setUserVerifiedBadge,
   subscribeAdminMemories,
   subscribeAllUsers,
+  subscribeDefaultThemeConfig,
   subscribeFreewillConfig,
   subscribeLiveOpeningGreeting,
   subscribePublicMemories,
   type AdminLevel,
   type AdminMemoryDoc,
+  type DefaultThemeMode,
   type ManagedUserRecord,
   type PublicMemoryDoc,
   type UserRole,
@@ -112,6 +118,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [confirmFreewillOn, setConfirmFreewillOn] = useState(false);
 
   const [maintenance, setMaintenance] = useState<MaintenanceState>(() => getMaintenanceState());
+  const [defaultTheme, setDefaultTheme] = useState<DefaultThemeMode>(() =>
+    readCachedAdminDefaultTheme()
+  );
+  const [savingDefaultTheme, setSavingDefaultTheme] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
@@ -180,12 +190,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setLiveGreetingInput('');
     }
 
+    const unsubDefaultTheme = subscribeDefaultThemeConfig(
+      (nextTheme) => setDefaultTheme(nextTheme),
+      (err) => setFeedback({ type: 'err', text: err.message })
+    );
+
     return () => {
       unsubUsers();
       unsubPublicMemories();
       unsubFreewill?.();
       unsubMemories?.();
       unsubLiveGreeting?.();
+      unsubDefaultTheme();
     };
   }, [adminLevel, canAccessMemories, canManageLiveGreeting, currentUser]);
 
@@ -728,6 +744,89 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <AlertTriangle className="h-3.5 w-3.5" />
             <span>{maintenance.active ? t.admin.maintenanceTurnOff : t.admin.maintenanceTurnOn}</span>
           </button>
+        </div>
+      </div>
+
+      {/* Pengaturan Tema Default Awal Web App */}
+      <div className="rounded-2xl border border-zinc-200 dark:border-[#242C44] bg-zinc-50/80 dark:bg-[#0B0F1A] p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0 flex-1 space-y-0.5">
+            <div className="flex items-center gap-2">
+              {defaultTheme === 'dark' ? (
+                <Moon className="h-4 w-4 shrink-0 text-[#0A36FF] dark:text-blue-400" />
+              ) : (
+                <Sun className="h-4 w-4 shrink-0 text-amber-500" />
+              )}
+              <span className="text-xs font-bold tracking-wide text-zinc-900 dark:text-white">
+                {t.admin.defaultThemeTitle}
+              </span>
+            </div>
+            <p className="text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-400">
+              {t.admin.defaultThemeDesc}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1.5 rounded-xl bg-zinc-200/70 p-1 dark:bg-[#14192B] shrink-0">
+            <button
+              type="button"
+              disabled={savingDefaultTheme || !currentUser}
+              onClick={async () => {
+                if (!currentUser || savingDefaultTheme || defaultTheme === 'dark') return;
+                setSavingDefaultTheme(true);
+                setFeedback(null);
+                try {
+                  await saveDefaultThemeConfig(currentUser, 'dark');
+                  setDefaultTheme('dark');
+                  setFeedback({ type: 'ok', text: t.admin.defaultThemeSavedDark });
+                } catch (err) {
+                  setFeedback({
+                    type: 'err',
+                    text: err instanceof Error ? err.message : 'Gagal mengubah tema default.',
+                  });
+                } finally {
+                  setSavingDefaultTheme(false);
+                }
+              }}
+              className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap ${
+                defaultTheme === 'dark'
+                  ? 'bg-gradient-to-r from-[#E51D2B] to-[#0A36FF] text-white shadow-sm'
+                  : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white'
+              }`}
+            >
+              <Moon className="h-3 w-3 shrink-0" />
+              <span>{t.admin.defaultThemeDark}</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={savingDefaultTheme || !currentUser}
+              onClick={async () => {
+                if (!currentUser || savingDefaultTheme || defaultTheme === 'light') return;
+                setSavingDefaultTheme(true);
+                setFeedback(null);
+                try {
+                  await saveDefaultThemeConfig(currentUser, 'light');
+                  setDefaultTheme('light');
+                  setFeedback({ type: 'ok', text: t.admin.defaultThemeSavedLight });
+                } catch (err) {
+                  setFeedback({
+                    type: 'err',
+                    text: err instanceof Error ? err.message : 'Gagal mengubah tema default.',
+                  });
+                } finally {
+                  setSavingDefaultTheme(false);
+                }
+              }}
+              className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap ${
+                defaultTheme === 'light'
+                  ? 'bg-white text-zinc-900 shadow-sm dark:bg-amber-400 dark:text-zinc-950'
+                  : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white'
+              }`}
+            >
+              <Sun className="h-3 w-3 shrink-0 text-amber-500 dark:text-amber-400" />
+              <span>{t.admin.defaultThemeLight}</span>
+            </button>
+          </div>
         </div>
       </div>
 

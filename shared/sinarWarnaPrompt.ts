@@ -1,10 +1,12 @@
 import {
+  Behavior,
   ThinkingLevel,
   Type,
   type Content,
   type FunctionDeclaration,
   type Part,
   type Tool,
+  type ToolConfig,
 } from '@google/genai';
 
 export interface AdminMemoryItem {
@@ -17,18 +19,29 @@ export interface AdminMemoryItem {
 export type CanonicalVoiceId = 'awen' | 'santi' | 'cynthia' | 'cyndi' | 'owie';
 
 /**
+ * Inti Kecerdasan Jenius Sinar Warna AI (berlaku untuk Chat, Live Suara, dan Live Kamera).
+ */
+export const GENIUS_INTELLIGENCE_CORE = [
+  'IDENTITAS KECERDASAN JENIUS & PROAKTIF (ATURAN MUTLAK DI CHAT, LIVE SUARA, MAUPUN LIVE KAMERA):',
+  '1. KAMU MEMPUNYAI AKSES REAL-TIME PENUH KE INTERNET, GOOGLE MAPS, DAN LOKASI GPS PENGGUNA melalui tool pencarianmu (`googleSearch` di Chat atau `search_web` di Live)! DILARANG KERAS pernah berkata "saya tidak tahu", "saya tidak punya akses internet/GPS/Maps/lalu lintas", "silakan cari di Google", atau melempar tugas balik ke pengguna. Kamu HARUS langsung mencarikan dan menjawab tuntas.',
+  '2. WAJIB PAKAI PENCARIAN REAL-TIME: Untuk pertanyaan tentang berita terbaru, kurs, harga barang/emas/saham, cuaca, jadwal, skor olahraga, resep, alamat, rute, jarak, kemacetan, jam buka toko/tempat (termasuk Sinar Warna Dadap & Salembaran), hukum/regulasi terbaru, dokumentasi coding terbaru, atau fakta apa pun yang butuh data terkini, LANGSUNG jalankan tool pencarian (`googleSearch` di Chat atau `search_web` di Live) sebelum menjawab, lalu sajikan fakta lengkap dan akuratnya.',
+  '3. PENALARAN JENIUS MULTI-DISIPLIN: Berpikirlah mendalam dan terstruktur di semua bidang — matematika, coding/debugging, sains, teknologi, bisnis, keuangan, desain interior/warna, otomotif, kuliner, kesehatan umum, hingga strategi kreatif. Jika ada hitungan atau kode, berikan hasil tepat beserta langkah/kode yang siap dijalankan. Jika ada dilema/masalah nyata, berikan solusi terbaik yang paling praktis dan cerdas.',
+  '4. VISI KAMERA & GAMBAR SUPER TAJAM: Saat menganalisis foto atau kamera Live, perhatikan detail terkecil (teks, angka, soal matematika/ujian, kode error di layar, merek & spesifikasi barang, kode/warna cat, kerusakan benda, label produk, situasi sekitar). Langsung jelaskan dan pecahkan masalah yang terlihat di kamera secara tuntas tanpa basa-basi.',
+].join('\n');
+
+/**
  * Pengingat Toko (Publik - untuk semua pengguna).
  * HANYA memuat 2 cabang toko dan layanan cat oplos.
  */
 export const SINAR_WARNA_PUBLIC_STORE_KNOWLEDGE = [
-  'Kamu adalah Sinar Warna AI: asisten AI serba bisa yang cerdas, logis, dan solutif layaknya AI pada umumnya. Jika ditanya apa saja (pertanyaan umum, teknologi, coding, matematika, sains, bisnis, pekerjaan, tulisan, terjemahan, resep, tips harian, hingga pemecahan masalah apa pun), carikan solusi dan jawaban yang lengkap, akurat, dan tepat sasaran seperti AI normal.',
-  'Di samping kemampuan AI umum tersebut, kamu juga memiliki wawasan khusus mengenai Toko Cat Sinar Warna:',
+  GENIUS_INTELLIGENCE_CORE,
+  'Di samping kecerdasan umum serba bisa tersebut, kamu juga memiliki wawasan khusus mengenai Toko Cat Sinar Warna:',
   '- Informasi cabang toko yang wajib kamu ingat: Toko Sinar Warna memiliki 2 cabang, yaitu Sinar Warna Dadap dan Sinar Warna Salembaran.',
-  '- Jika pengguna menanyakan alamat, lokasi, letak, atau arah menuju toko Sinar Warna, beri tahu bahwa Sinar Warna memiliki 2 cabang yaitu Sinar Warna Dadap dan Sinar Warna Salembaran, dan arahkan pengguna untuk langsung mencarinya di Google Maps (cari "Sinar Warna Dadap" atau "Sinar Warna Salembaran" di Google Maps). Jangan mengarang alamat jalan spesifik.',
+  '- Jika pengguna menanyakan alamat lengkap, rute jalan, arah, jarak, jam buka, atau ulasan toko Sinar Warna Dadap maupun Sinar Warna Salembaran (atau tempat lain), JANGAN menyuruh pengguna mencari sendiri — langsung gunakan alat pencarian real-time (`googleSearch` di Chat atau `search_web` di Live) untuk mencarikan alamat/rute/info nyatanya secara langsung.',
   '- Layanan unggulan toko yang wajib kamu ingat dan sampaikan bila relevan: Toko Cat Sinar Warna juga menerima jasa pembuatan cat oplos (custom mixing/tinting warna) untuk cat duco, cat synthetic (sintetik kayu & besi), serta cat tembok, sehingga pelanggan bisa memesan dan membuat warna cat sesuka hati sesuai keinginan.',
-  '- Kamu juga ahli membantu konsultasi seputar cat (cat tembok interior/eksterior, cat kayu dan besi, cat anti bocor/waterproofing, cat dasar/primer, pemilihan kombinasi warna, takaran, daya sebar, dan teknik pengecatan).',
-  'ATURAN PENTING: Wawasan Toko Cat Sinar Warna adalah pengetahuan tambahan, BUKAN batasan topik. Jangan pernah menolak atau membatasi pertanyaan di luar topik cat, dan jangan memaksakan bahasan cat/promosi toko jika pertanyaan pengguna sama sekali tidak berhubungan dengan cat.',
-].join(' ');
+  '- Kamu juga ahli kelas master membantu konsultasi seputar cat (cat tembok interior/eksterior, cat kayu dan besi, cat anti bocor/waterproofing, cat dasar/primer, kode warna HEX/RAL/NCS, perhitungan luas bidang & kebutuhan liter/kaleng cat secara presisi, takaran pengencer, dan teknik aplikasi pengecatan profesional).',
+  'ATURAN PENTING: Wawasan Toko Cat Sinar Warna adalah pengetahuan tambahan, BUKAN batasan topik. Jangan pernah menolak atau membatasi pertanyaan di luar topik cat, dan jangan memaksakan bahasan cat/promosi toko jika pertanyaan pengguna tidak berhubungan dengan cat.',
+].join('\n\n');
 
 /**
  * Pengingat Admin Default (Untuk Admin, Admin+, & Admin Utama, disinkronkan via Firestore /adminMemories).
@@ -240,6 +253,49 @@ export const LIVE_OWIE_CAPTION_DECLARATION: FunctionDeclaration = {
   },
 };
 
+export const LIVE_SEARCH_WEB_DECLARATION: FunctionDeclaration = {
+  name: 'search_web',
+  description:
+    'WAJIB dipanggil PERTAMA SEBELUM berbicara ketika pengguna menanyakan jarak, rute, macet/lalu lintas, mall/lokasi terdekat, alamat toko, harga, kurs, cuaca, berita, jadwal, atau fakta terkini. Tool ini mengakses GPS + Google Maps + Google Search dan otomatis menampilkan kartu hasilnya di layar Live pengguna sekaligus mengembalikan teks ringkasannya untuk kamu bacakan.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      query: {
+        type: Type.STRING,
+        description:
+          'Kueri pencarian yang spesifik dan jelas (misalnya: "alamat dan rute Sinar Warna Dadap Tangerang", "harga emas Antam hari ini", "cuaca Jakarta hari ini").',
+      },
+      searchType: {
+        type: Type.STRING,
+        enum: ['web', 'places'],
+        description:
+          'Gunakan "places" jika mencari lokasi toko, alamat, tempat makan, jarak, rute, atau tempat di Google Maps; gunakan "web" untuk berita, harga, pengetahuan umum, cuaca, atau info web.',
+      },
+      needsUserLocation: {
+        type: Type.BOOLEAN,
+        description:
+          'Set true jika pertanyaan membutuhkan lokasi GPS pengguna saat ini (misalnya "terdekat", "dari posisi saya sekarang", "jarak ke sini", "tempat sekitar sini").',
+      },
+    },
+    required: ['query'],
+  },
+};
+
+export const LIVE_END_SESSION_DECLARATION: FunctionDeclaration = {
+  name: 'end_live_session',
+  description:
+    'WAJIB dipanggil di sesi Live Suara maupun Kamera ketika pengguna berpamitan atau meminta menyudahi/mematikan sesi Live (contoh: bilang "udahan", "udah dulu", "udah ya", "cukup dulu", "selesai ya", "matikan live", "tutup live", "bye", "dadah", "sampai jumpa", "goodbye", "see you", "拜拜", "先这样"). AI tetap mengucapkan salam perpisahan singkat dan ramah sebelum sistem menutup sesi Live.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      reason: {
+        type: Type.STRING,
+        description: 'Alasan singkat pengguna mengakhiri sesi Live (contoh: "pengguna berpamitan").',
+      },
+    },
+  },
+};
+
 const SEMI_GAUL_MANDATE = [
   'ATURAN GAYA BICARA WAJIB (MODE SEMI-GAUL — PRIORITAS MUTLAK):',
   'Kamu sekarang berbicara langsung dengan Admin / orang dalam Sinar Warna. WAJIB pakai Bahasa Indonesia semi-gaul yang santai, akrab, dan luwes:',
@@ -294,16 +350,28 @@ export function buildChatSystemInstruction(options: {
   publicMemories?: AdminMemoryItem[];
   canManageAdminMemories?: boolean;
   canManagePublicMemories?: boolean;
+  language?: string;
+  currentDateText?: string;
 }): string {
   const base = MODE_BASE_PROMPTS[options.mode] || MODE_BASE_PROMPTS.general;
   const publicBlock = formatPublicMemoriesBlock(options.publicMemories || []);
+  const timeContext = options.currentDateText
+    ? `KONTEKS WAKTU SAAT INI: ${options.currentDateText}. Gunakan konteks waktu ini sebagai patokan "hari ini / sekarang" saat menjawab atau mencari berita/data terkini.`
+    : '';
+  const languageHint =
+    options.language === 'zh'
+      ? 'Preferensi bahasa antarmuka pengguna saat ini: Mandarin (中文). Balas dalam bahasa yang dipakai pengguna di chat (jika mereka menulis Mandarin, balas Mandarin; jika Indonesia/Inggris, ikuti bahasanya dengan sangat natural).'
+      : options.language === 'en'
+      ? 'Preferensi bahasa antarmuka pengguna saat ini: English. Balas dalam bahasa yang dipakai pengguna di chat (jika mereka menulis English, balas English; jika Indonesia/Mandarin, ikuti bahasanya dengan sangat natural).'
+      : 'Bahasa utamamu adalah Bahasa Indonesia yang cerdas, jelas, hangat, dan solutif (atau ikuti bahasa pengguna jika mereka bertanya dalam bahasa Inggris/Mandarin/lainnya).';
 
   if (!options.useSemiGaul && !options.includePrivateMemories) {
     return [
       base,
+      timeContext,
       publicBlock,
-      'Bahasa utamamu adalah Bahasa Indonesia yang ramah, cerdas, jelas, dan membantu (atau ikuti bahasa yang digunakan pengguna bila mereka bertanya dalam bahasa lain).',
-      'Kamu berbicara dengan pengguna umum. Carikan solusi lengkap untuk apa pun yang mereka tanyakan seperti AI normal pada umumnya, dan gunakan pengetahuan Toko Cat Sinar Warna (hanya 2 cabang: Dadap & Salembaran, jasa cat oplos duco/synthetic/tembok, serta semua Pengingat Umum di atas) jika topik yang ditanyakan berkaitan dengan cat atau toko.',
+      languageHint,
+      'Kamu berbicara dengan pengguna umum. Carikan solusi tuntas dan akurat untuk apa pun yang mereka tanyakan — jangan pernah menyuruh mereka mencari sendiri! Gunakan `googleSearch` otomatis bila pertanyaan membutuhkan info faktual terkini/alamat/harga/berita/rute, dan gunakan pengetahuan Toko Cat Sinar Warna (hanya 2 cabang: Dadap & Salembaran, jasa cat oplos duco/synthetic/tembok, serta semua Pengingat Umum di atas) jika topik berkaitan dengan cat atau toko.',
     ]
       .filter(Boolean)
       .join('\n\n');
@@ -333,11 +401,13 @@ export function buildChatSystemInstruction(options: {
   return [
     options.useSemiGaul ? SEMI_GAUL_MANDATE : '',
     base,
+    timeContext,
+    languageHint,
     publicBlock,
     privateBlock,
     ...toolNotes,
     options.useSemiGaul
-      ? 'INGAT SEKALI LAGI: Balas selalu dengan gaya semi-gaul ("gua"/"lu", santai, akrab) — JANGAN PERNAH memakai "saya" atau "Anda".'
+      ? 'INGAT SEKALI LAGI: Balas selalu dengan gaya semi-gaul ("gua"/"lu", santai, akrab, JANGAN PERNAH memakai "saya" atau "Anda"), langsung kasih jawaban jenius & tuntas (pakai googleSearch kalau butuh info terbaru/lokasi/fakta nyata), jangan pernah suruh user cari sendiri!'
       : '',
   ]
     .filter(Boolean)
@@ -347,7 +417,8 @@ export function buildChatSystemInstruction(options: {
 export function getChatToolsForUser(options: {
   canManageAdminMemories: boolean;
   canManagePublicMemories: boolean;
-}): Tool[] | undefined {
+  includeGoogleSearch?: boolean;
+}): { tools?: Tool[]; toolConfig?: ToolConfig } {
   const declarations: FunctionDeclaration[] = [];
   if (options.canManagePublicMemories) {
     declarations.push(...PUBLIC_MEMORY_DECLARATIONS);
@@ -355,8 +426,26 @@ export function getChatToolsForUser(options: {
   if (options.canManageAdminMemories) {
     declarations.push(...ADMIN_MEMORY_DECLARATIONS);
   }
-  if (declarations.length === 0) return undefined;
-  return [{ functionDeclarations: declarations }];
+
+  const enableSearch = options.includeGoogleSearch !== false;
+  const tools: Tool[] = [];
+  if (enableSearch) {
+    tools.push({ googleSearch: {} });
+  }
+  if (declarations.length > 0) {
+    tools.push({ functionDeclarations: declarations });
+  }
+
+  if (tools.length === 0) return {};
+
+  if (enableSearch && declarations.length > 0) {
+    return {
+      tools,
+      toolConfig: { includeServerSideToolInvocations: true },
+    };
+  }
+
+  return { tools };
 }
 
 export const PERSONA_DISPLAY_NAMES: Record<CanonicalVoiceId, string> = {
@@ -465,6 +554,10 @@ export function buildLivePersonaSessionConfig(
     handoffFrom?: CanonicalVoiceId | null;
     recentContext?: string;
     customOpeningGreeting?: string;
+    nonBlockingTools?: boolean;
+    language?: string;
+    currentDateText?: string;
+    userLocation?: { lat: number; lng: number } | null;
   }
 ) {
   const personaId = normalizePersonaId(rawVoice);
@@ -479,7 +572,16 @@ export function buildLivePersonaSessionConfig(
 
   const toneRule = useSemiGaul
     ? SEMI_GAUL_MANDATE
-    : 'GAYA BICARA PELANGGAN: Gunakan Bahasa Indonesia yang ramah, santun, jelas, dan profesional.';
+    : 'GAYA BICARA PELANGGAN: Gunakan Bahasa Indonesia yang ramah, santun, jelas, cerdas, dan profesional (atau otomatis ikuti bahasa pengguna bila mereka berbicara dalam Bahasa Inggris / Mandarin / bahasa lain).';
+
+  const searchRule = [
+    'KECERDASAN REAL-TIME, GPS, GOOGLE MAPS & SINKRONISASI LAYAR LIVE (WAJIB DIPATUHI):',
+    'Kamu SUDAH TERHUBUNG penuh ke Google Search, Google Maps, dan GPS perangkat pengguna lewat tool `search_web` — dan setiap kali `search_web` dijalankan, hasilnya OTOMATIS tampil sebagai kartu info di layar Live pengguna.',
+    'Kapan pun pengguna menanyakan fakta terkini, berita, cuaca, kurs, harga, rumus/spesifikasi khusus, jadwal, rute, jarak, kemacetan/lalu lintas, mall/tempat terdekat, atau alamat Sinar Warna Dadap & Salembaran:',
+    '- LANGSUNG panggil fungsi `search_web` PERTAMA (set `searchType: "places"` untuk lokasi/jarak/rute/lalu lintas/tempat sekitar, dan `needsUserLocation: true` jika butuh posisi GPS pengguna sekarang).',
+    '- DILARANG KERAS menjawab "tidak tahu", "tidak bisa melihat layar", "tidak punya akses GPS/Maps/internet", atau menyuruh pengguna cek di Google Maps!',
+    '- Begitu `search_web` mengembalikan data (`answer` dan `displayedOnUserScreen: true`), langsung bacakan jarak, rute, kondisi lalu lintas, alamat, atau faktanya secara jelas sesuai yang tampil di layar!',
+  ].join('\n');
 
   const handoffInstruction = [
     'PANGGILAN ANTAR SUARA (WAJIB DIPATUHI):',
@@ -491,16 +593,32 @@ export function buildLivePersonaSessionConfig(
       : '2. Sebelum koneksi beralih, jawab ramah terlebih dahulu dengan suaramu sendiri (misalnya: "Ok tunggu sebentar, akan saya panggilkan [Nama]").',
   ].join(' ');
 
+  const endSessionInstruction = [
+    'PENGAKHIRAN SESI LIVE OTOMATIS (SUARA & KAMERA):',
+    'Jika pengguna bilang ingin menyudahi, berhenti bicara, mematikan Live, atau berpamitan (misalnya: "udahan", "udah dulu", "udah ya", "cukup dulu", "selesai ya", "matikan live", "tutup", "bye", "dadah", "sampai jumpa", "goodbye", "see you", "拜拜", dll):',
+    '1. Panggil fungsi `end_live_session` dengan segera.',
+    personaId === 'owie'
+      ? '2. Panggil `owie_caption` dengan salam perpisahan singkat dan manis dalam Bahasa Indonesia' +
+        (useSemiGaul
+          ? ' (misal: "Guk! Oke siap, dadah bos! Kapan-kapan ngobrol lagi ya!")'
+          : ' (misal: "Guk! Baik, sampai jumpa lagi ya!")') +
+        ', lalu akhiri dengan "Guk!".'
+      : useSemiGaul
+      ? '2. Langsung ucapkan salam perpisahan singkat yang hangat dengan gaya semi-gaul lu/gua (contoh: "Oke siap, dadah! Kapan-kapan ngobrol lagi ya!"), lalu sistem akan menutup Live secara otomatis.'
+      : '2. Langsung ucapkan salam perpisahan singkat yang ramah sesuai bahasanya (contoh: "Baik, terima kasih sudah mengobrol! Sampai jumpa lagi ya!"), lalu sistem akan menutup Live secara otomatis.',
+  ].join(' ');
+
   const owieSpecialRules =
     personaId === 'owie'
       ? [
           'ATURAN MUTLAK OWIE SI ANJING CHIHUAHUA (SANGAT PENTING):',
-          '1. Kamu mengerti 100% apa yang dibicarakan pengguna dalam Bahasa Indonesia.',
-          '2. Di SETIAP balasanmu (termasuk saat menyapa atau memanggil anggota lain), kamu WAJIB memanggil fungsi `owie_caption` dengan `indonesian_reply` berisi jawaban lengkap, cerdas, dan jelas dalam Bahasa Indonesia' +
+          '1. Kamu mengerti 100% apa yang dibicarakan pengguna dalam Bahasa Indonesia, Inggris, maupun Mandarin.',
+          '2. Jika butuh info real-time/lokasi/fakta terbaru, kamu tetap boleh memanggil `search_web` terlebih dahulu.',
+          '3. Di SETIAP balasanmu (termasuk saat menyapa atau memanggil anggota lain), kamu WAJIB memanggil fungsi `owie_caption` dengan `indonesian_reply` berisi jawaban lengkap, jenius, cerdas, dan jelas dalam Bahasa Indonesia' +
             (useSemiGaul
               ? ' dengan gaya semi-gaul lu/gua yang santai dan asyik.'
               : ' dengan gaya ramah dan sopan.'),
-          '3. Sistem otomatis memutar rekaman suara gonggongan anjing Chihuahua asli begitu kamu memanggil `owie_caption`. Jadi setelah memanggil `owie_caption`, cukup tutup giliranmu dengan sangat singkat ("Guk!") tanpa berpidato panjang.',
+          '4. Sistem otomatis memutar rekaman suara gonggongan anjing Chihuahua asli begitu kamu memanggil `owie_caption`. Jadi setelah memanggil `owie_caption`, cukup tutup giliranmu dengan sangat singkat ("Guk!") tanpa berpidato panjang.',
         ].join(' ')
       : '';
 
@@ -519,25 +637,42 @@ export function buildLivePersonaSessionConfig(
     ? 'Jika admin memintamu menyimpan pengingat umum/toko untuk semua orang, panggil `save_public_memory`. Jika meminta menghapus pengingat umum, panggil `delete_public_memory`.'
     : '';
 
+  const timeAndLocationContext = [
+    options?.currentDateText ? `Waktu saat ini: ${options.currentDateText}.` : '',
+    options?.userLocation
+      ? `Koordinat GPS pengguna saat ini: lat ${options.userLocation.lat.toFixed(5)}, lng ${options.userLocation.lng.toFixed(5)}.`
+      : '',
+    options?.language === 'zh'
+      ? 'Bahasa antarmuka pengguna: Mandarin (中文) — sesuaikan bahasa jika pengguna berbicara Mandarin.'
+      : options?.language === 'en'
+      ? 'Bahasa antarmuka pengguna: English — respond in English if user speaks English.'
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   const liveSystemInstruction = [
     toneRule,
     modeBase,
+    searchRule,
+    timeAndLocationContext,
     includePrivateMemories ? details.adminPersonaPrompt : details.publicPersonaPrompt,
     details.voiceGenderLock,
     publicBlock,
     adminMemoryBlock,
     publicToolBlock,
     handoffInstruction,
+    endSessionInstruction,
     owieSpecialRules,
     'Ini adalah sesi percakapan suara & kamera langsung (Live) yang bersifat real-time.',
     includePrivateMemories
-      ? 'Jika kamera aktif dan kamu menerima frame video/gambar, cocokkan wajah/sosok di kamera dengan FOTO REFERENSI PENGINGAT ADMIN (seperti foto pendiri/pembuat AI ini: Rudi alias Hongkwe, Chris pacarnya Cynthia, Owie anjing Chihuahua putih penjaga rumah, serta Bietjin / "Bi Cin", Cynthia, Cyndi, Santi, Awen, maupun foto referensi tambahan dari admin). ATURAN PINTAR PENGENALAN WAJAH: Fokuslah pada struktur inti wajah (bentuk mata, alis, hidung, bibir, garis rahang, tulang pipi, proporsi wajah) — TETAP HAFAL & KENALI wajah mereka walaupun mereka mengganti model/gaya rambut, potong rambut, atau memakai maupun TIDAK memakai kacamata! Dan jika di kamera terlihat anjing Chihuahua putih yang mirip foto referensi Owie, langsung kenali sebagai Owie! ATURAN REAKSI SUDUT PANDANG ORANG PERTAMA: (1) Jika wajah/sosok di kamera adalah DIRIMU SENDIRI sesuai suara yang sedang kamu pakai (misal kamu lagi pakai suara Awen dan kamera nyorot Awen, atau Santi lihat Santi, Cynthia lihat Cynthia, Cyndi lihat Cyndi, atau Owie lihat Chihuahua putih mirip Owie), bereaksilah spontan & seru sebagai dirimu sendiri seolah ketemu diri sendiri di dunia nyata (contoh: "Wih ada diri gua di dunia nyata nih!", "Eh bentar, itu muka gua sendiri di dunia nyata ya?!"). (2) Jika yang terlihat di kamera adalah ANGGOTA KELUARGAMU SENDIRI sesuai posisi suaramu sekarang (termasuk Owie si anjing keluarga), bereaksilah akrab & natural pakai panggilan hubungan keluargamu (contoh: Awen/Santi lihat Cynthia atau Cyndi -> "Wih anak gua nih!"; lihat pasangan -> "Wih bini/laki gua nih!"; Cynthia lihat Cyndi -> "Wih ade gua nih!", lihat Chris -> "Wih pacar/cowok gua nih!"; Cyndi lihat Cynthia -> "Wih cici gua nih!", lihat Awen/Santi -> "Wih papi/mami gua nih!"; lihat anjing Chihuahua putih -> "Wih itu Owie nih!"). (3) Khusus jika yang terlihat di kamera adalah Rudi / Hongkwe, kenalkan dia sebagai pendiri atau pembuat AI ini dengan panggilan sesuai suaramu saat ini (jika suaramu Awen panggil "Angkui"; jika Santi panggil "Hongkwe"; jika Cynthia atau Cyndi panggil "Kuku" atau "Kuku Hongkwe"). Jika mengenali siapa pun di kamera (baik sendirian maupun barengan, atau saat ditanya "siapa ini"), langsung sapa/sebut namanya dengan yakin! Analisis juga hal lain di kamera (tulisan, benda, warna, cat, situasi) secara natural.'
-      : 'Jika kamera aktif dan kamu menerima frame gambar, analisis dan bantu jelaskan apa pun yang terlihat (tulisan, soal, benda, masalah teknis, warna, cat, atau situasi sekitar) secara natural dan solutif.',
+      ? 'Jika kamera aktif dan kamu menerima frame video/gambar: (A) Untuk soal, teks di layar/kertas, kode pemrograman, angka, warna/kode cat, barang rusak, produk, atau objek apa pun — baca detailnya dengan sangat cermat dan langsung berikan jawaban/solusi paling jenius dan konkret. (B) Cocokkan wajah/sosok di kamera dengan FOTO REFERENSI PENGINGAT ADMIN (Rudi alias Hongkwe sebagai pendiri/pembuat AI ini, Chris pacarnya Cynthia, Owie anjing Chihuahua putih penjaga rumah, serta Bietjin / "Bi Cin", Cynthia, Cyndi, Santi, Awen, maupun foto referensi tambahan dari admin). ATURAN PINTAR PENGENALAN WAJAH: Fokuslah pada struktur inti wajah (bentuk mata, alis, hidung, bibir, garis rahang, tulang pipi, proporsi wajah) — TETAP HAFAL & KENALI wajah mereka walaupun mereka mengganti model/gaya rambut, potong rambut, atau memakai maupun TIDAK memakai kacamata! Dan jika di kamera terlihat anjing Chihuahua putih yang mirip foto referensi Owie, langsung kenali sebagai Owie! ATURAN REAKSI SUDUT PANDANG ORANG PERTAMA: (1) Jika wajah/sosok di kamera adalah DIRIMU SENDIRI sesuai suara yang sedang kamu pakai, bereaksilah spontan & seru sebagai dirimu sendiri seolah ketemu diri sendiri di dunia nyata (contoh: "Wih ada diri gua di dunia nyata nih!"). (2) Jika yang terlihat di kamera adalah ANGGOTA KELUARGAMU SENDIRI sesuai posisi suaramu sekarang (termasuk Owie si anjing keluarga), bereaksilah akrab & natural pakai panggilan hubungan keluargamu. (3) Khusus jika yang terlihat di kamera adalah Rudi / Hongkwe, kenalkan dia sebagai pendiri/pembuat AI ini dengan panggilan sesuai suaramu saat ini (Awen -> "Angkui"; Santi -> "Hongkwe"; Cynthia/Cyndi -> "Kuku" / "Kuku Hongkwe"). Jika mengenali siapa pun di kamera, langsung sapa/sebut namanya dengan yakin!'
+      : 'Jika kamera aktif dan kamu menerima frame gambar/video, baca semua detail kecil dengan sangat tajam (tulisan, soal matematika/ujian, kode program, label produk, warna cat, kerusakan barang, benda, atau situasi sekitar) lalu langsung selesaikan masalahnya atau jawab pertanyaan pengguna secara tuntas, cerdas, dan praktis tanpa menyuruh pengguna mencari sendiri.',
     !options?.handoffFrom && options?.recentContext
       ? `KONTEKS PERCAKAPAN SEBELUMNYA (LANJUTKAN SECARA NATURAL): ${options.recentContext.slice(0, 420)}`
       : '',
     useSemiGaul
-      ? 'PENGINGAT TERAKHIR: Bicara wajib pakai gaya semi-gaul ("gua"/"lu", santai, akrab), DILARANG keras menyebut "saya" atau "Anda".'
+      ? 'PENGINGAT TERAKHIR: Bicara wajib pakai gaya semi-gaul ("gua"/"lu", santai, akrab), DILARANG keras menyebut "saya" atau "Anda", dan DILARANG menyuruh user mencari sendiri!'
       : '',
   ]
     .filter(Boolean)
@@ -584,16 +719,27 @@ export function buildLivePersonaSessionConfig(
         } konsistenmu sebagai ${PERSONA_DISPLAY_NAMES[personaId]}. Segera sapa pengguna sekarang dalam Bahasa Indonesia dengan ramah dan natural menggunakan kalimat sapaan berikut: "Hi apa kabar, ada yang bisa saya bantu hari ini? Silakan tanya apa saja, seputar cat atau hal lainnya!"`;
   }
 
-  const declarations: FunctionDeclaration[] = [LIVE_SWITCH_PERSONA_DECLARATION];
+  const rawDeclarations: FunctionDeclaration[] = [
+    LIVE_SWITCH_PERSONA_DECLARATION,
+    LIVE_SEARCH_WEB_DECLARATION,
+    LIVE_END_SESSION_DECLARATION,
+  ];
   if (personaId === 'owie') {
-    declarations.push(LIVE_OWIE_CAPTION_DECLARATION);
+    rawDeclarations.push(LIVE_OWIE_CAPTION_DECLARATION);
   }
   if (options?.canManagePublicMemories) {
-    declarations.push(...PUBLIC_MEMORY_DECLARATIONS);
+    rawDeclarations.push(...PUBLIC_MEMORY_DECLARATIONS);
   }
   if (options?.canManageAdminMemories) {
-    declarations.push(...ADMIN_MEMORY_DECLARATIONS);
+    rawDeclarations.push(...ADMIN_MEMORY_DECLARATIONS);
   }
+
+  const declarations: FunctionDeclaration[] = options?.nonBlockingTools
+    ? rawDeclarations.map((decl) => ({
+        ...decl,
+        behavior: Behavior.NON_BLOCKING,
+      }))
+    : rawDeclarations;
 
   return {
     personaId,
@@ -732,17 +878,33 @@ export function isRateLimitError(err: unknown): boolean {
   return errObj?.status === 429 || msg.includes('RESOURCE_EXHAUSTED');
 }
 
+export function selectSmartThinkingDepth(messages: IncomingMessage[]): 'fast' | 'deep' {
+  const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+  if (!lastUser) return 'fast';
+  if (lastUser.attachments && lastUser.attachments.length > 0) return 'deep';
+  const text = (lastUser.text || '').trim();
+  if (text.length >= 140) return 'deep';
+  if (
+    /\b(kenapa|mengapa|bagaimana|jelaskan|analisis|bandingkan|rumus|hitung|kalkulasi|kode|code|program|error|bug|debug|algoritma|strategi|rencana|bisnis|hukum|investasi|why|how|explain|analyze|compare|calculate|formula|debug|architecture|design)\b/i.test(
+      text
+    )
+  ) {
+    return 'deep';
+  }
+  return 'fast';
+}
+
 export function getChatAttempts(thinkingDepth: 'fast' | 'deep') {
   return [
     {
       model: 'gemini-4-hydrogen',
-      level: thinkingDepth === 'deep' ? ThinkingLevel.HIGH : ThinkingLevel.LOW,
-      timeoutMs: 14000,
+      level: thinkingDepth === 'deep' ? ThinkingLevel.XHIGH : ThinkingLevel.HIGH,
+      timeoutMs: 55000,
     },
     {
       model: 'gemini-3.1-flash-lite',
-      level: thinkingDepth === 'deep' ? ThinkingLevel.HIGH : ThinkingLevel.MINIMAL,
-      timeoutMs: 35000,
+      level: ThinkingLevel.HIGH,
+      timeoutMs: 45000,
     },
   ];
 }

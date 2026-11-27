@@ -19,10 +19,11 @@
    - Blocked or deleted users (`users/{uid}.blocked == true || users/{uid}.deleted == true`) are denied creating or updating conversations/messages.
    - Regular users can only read/write their own `/conversations/{conversationId}` and `/conversations/{conversationId}/messages/{messageId}` documents.
    - Verified Admins may list/delete target user conversations and messages strictly for account deletion cleanup.
-5. **Public Live & Freewill Config (`/appConfig/live`, `/appConfig/freewill`)**:
+5. **Public Live, Freewill & Default Theme Config (`/appConfig/live`, `/appConfig/freewill`, `/appConfig/theme`)**:
    - `/appConfig/live` contains non-PII configuration (`greetingText`, `updatedBy` UID, timestamps), writable strictly by `isAdminPlus()`.
    - `/appConfig/freewill` contains non-PII `enabled` boolean and `memoriesSummary` (cleared to `""` whenever disabled), writable strictly by `isPrimaryAdmin()` (`rudi.sinarwarna@gmail.com`).
-   - Both documents are readable via single-document `get` (`allow list: if false`) so the server and clients reflect active settings without exposing PII.
+   - `/appConfig/theme` contains non-PII `defaultTheme` (`"dark"` or `"light"`), writable strictly by `isAnyAdmin()`.
+   - All three documents are readable via single-document `get` (`allow list: if false`) so the server and clients reflect active settings without exposing PII.
 6. **Public AI Memories (`/publicMemories/{memoryId}`)**:
    - Non-PII general store/service memories (`isPublic == true`, no `createdByEmail`), readable via `get` and guarded `list` (`resource.data.isPublic == true`) so AI serves them for everyone.
    - Writable (`create`, `update`, `delete`) by `Admin` tier and above (`isAdminOrFreewill()`).

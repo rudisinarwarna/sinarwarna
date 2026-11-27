@@ -255,6 +255,34 @@
       },
       "required": ["enabled", "memoriesSummary", "updatedBy", "createdAt", "updatedAt"]
     },
+    "AppThemeSettings": {
+      "title": "AppThemeSettings",
+      "description": "Global default initial theme preference ('dark' or 'light') managed by Admin tier and above.",
+      "type": "object",
+      "properties": {
+        "defaultTheme": {
+          "type": "string",
+          "enum": ["dark", "light"],
+          "maxLength": 16,
+          "description": "Default initial appearance mode for new visitors without a personal theme preference."
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "UID of the Admin who updated the default theme."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["defaultTheme", "updatedBy", "createdAt", "updatedAt"]
+    },
     "PublicMemory": {
       "title": "PublicMemory",
       "description": "Non-PII general store/service memory active in AI for everyone and managed by Admin tier and above.",
@@ -417,7 +445,7 @@
     },
     "/appConfig/{docId}": {
       "schema": { "$ref": "#/entities/AppLiveSettings" },
-      "description": "App configuration docs ('live' for Admin+ opening greeting, 'freewill' for Primary Admin FREEWILL toggle)."
+      "description": "App configuration docs ('live' for Admin+ opening greeting, 'freewill' for Primary Admin FREEWILL toggle, 'theme' for Admin default initial theme)."
     },
     "/conversations/{conversationId}": {
       "schema": { "$ref": "#/entities/Conversation" },

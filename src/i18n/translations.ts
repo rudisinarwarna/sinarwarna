@@ -97,6 +97,7 @@ export interface AppTranslations {
     newVariations: string;
     newVariationsPrompt: string;
     adminRawErrorBadge: string;
+    webSourcesLabel: string;
   };
   settings: {
     dialogAria: string;
@@ -239,6 +240,13 @@ export interface AppTranslations {
     gpsUnsupportedTitle: string;
     gpsUnsupportedDesc: string;
     gpsTrafficOk: string;
+    webSourcesTitle: string;
+    openGoogleMaps: string;
+    endingLiveNotice: string;
+    audioSpeakerLabel: string;
+    audioEarpieceLabel: string;
+    audioRouteToEarpieceTooltip: string;
+    audioRouteToSpeakerTooltip: string;
   };
   admin: {
     modalAria: string;
@@ -258,6 +266,12 @@ export interface AppTranslations {
     maintenanceFeedbackOff: string;
     maintenanceManualReason: string;
     maintenanceSimulatedError: string;
+    defaultThemeTitle: string;
+    defaultThemeDesc: string;
+    defaultThemeDark: string;
+    defaultThemeLight: string;
+    defaultThemeSavedDark: string;
+    defaultThemeSavedLight: string;
   };
   errors: {
     emptyAiReply: string;
@@ -371,6 +385,7 @@ const ID_TRANSLATIONS: AppTranslations = {
     newVariations: 'Variasi Baru',
     newVariationsPrompt: 'Kembangkan ide di atas dengan 3 variasi kreatif baru yang lebih berani dan detail.',
     adminRawErrorBadge: 'Admin Debug: Error Asli',
+    webSourcesLabel: 'Sumber Web Terverifikasi',
   },
   settings: {
     dialogAria: 'Pengaturan Sinar Warna',
@@ -436,7 +451,7 @@ const ID_TRANSLATIONS: AppTranslations = {
     processingRegister: 'Mendaftarkan akun...',
     loginWithEmail: 'Masuk dengan Email',
     registerAccount: 'Daftar Akun Baru',
-    orContinueWith: 'atau lanjutkan dengan',
+    orContinueWith: 'atau gunakan email',
     connecting: 'Menghubungkan...',
     errEnterEmail: 'Masukkan alamat email Anda.',
     errPasswordLength: 'Kata sandi minimal 6 karakter.',
@@ -511,8 +526,15 @@ const ID_TRANSLATIONS: AppTranslations = {
     wsDisconnectedPrefix: 'Koneksi AI Live terputus',
     wsDisconnectedSuffix: '. Tekan Sambung Ulang untuk melanjutkan.',
     gpsUnsupportedTitle: 'Lokasi & Peta Sinar Warna',
-    gpsUnsupportedDesc: 'GPS tidak didukung perangkat ini. Menampilkan lokasi pusat Sinar Warna.',
-    gpsTrafficOk: 'Lancar Terkendali (Lancar 32 km/h)',
+    gpsUnsupportedDesc: 'GPS tidak didukung perangkat ini. Menampilkan lokasi Sinar Warna.',
+    gpsTrafficOk: 'Cek lalu lintas langsung di Google Maps',
+    webSourcesTitle: 'Hasil Pencarian & Referensi',
+    openGoogleMaps: 'Buka di Google Maps',
+    endingLiveNotice: 'Mengakhiri sesi Live...',
+    audioSpeakerLabel: 'Speaker',
+    audioEarpieceLabel: 'Kuping',
+    audioRouteToEarpieceTooltip: 'Pindah suara ke speaker kuping',
+    audioRouteToSpeakerTooltip: 'Pindah suara ke speaker depan',
   },
   admin: {
     modalAria: 'Panel Administrator Sinar Warna',
@@ -534,6 +556,13 @@ const ID_TRANSLATIONS: AppTranslations = {
     maintenanceFeedbackOff: 'Siaran Pemeliharaan telah dimatikan.',
     maintenanceManualReason: 'Diaktifkan manual oleh Admin',
     maintenanceSimulatedError: 'Uji Coba Siaran Admin (Simulasi Limit)',
+    defaultThemeTitle: 'TEMA DEFAULT AWAL WEB APP',
+    defaultThemeDesc:
+      'Menentukan tampilan awal (Gelap atau Terang) saat pengunjung baru pertama kali membuka Sinar Warna.',
+    defaultThemeDark: 'Gelap (Default)',
+    defaultThemeLight: 'Terang',
+    defaultThemeSavedDark: 'Tema default awal web app diatur ke Tema Gelap.',
+    defaultThemeSavedLight: 'Tema default awal web app diatur ke Tema Terang.',
   },
   errors: {
     emptyAiReply: 'Respons AI kosong atau terputus. Silakan coba kirim ulang.',
@@ -647,6 +676,7 @@ const EN_TRANSLATIONS: AppTranslations = {
     newVariations: 'New Variations',
     newVariationsPrompt: 'Expand the idea above with 3 bold, detailed new creative variations.',
     adminRawErrorBadge: 'Admin Debug: Raw Error',
+    webSourcesLabel: 'Verified Web Sources',
   },
   settings: {
     dialogAria: 'Sinar Warna Settings',
@@ -712,7 +742,7 @@ const EN_TRANSLATIONS: AppTranslations = {
     processingRegister: 'Creating account...',
     loginWithEmail: 'Sign In with Email',
     registerAccount: 'Register New Account',
-    orContinueWith: 'or continue with',
+    orContinueWith: 'or use email',
     connecting: 'Connecting...',
     errEnterEmail: 'Please enter your email address.',
     errPasswordLength: 'Password must be at least 6 characters.',
@@ -787,8 +817,15 @@ const EN_TRANSLATIONS: AppTranslations = {
     wsDisconnectedPrefix: 'AI Live connection lost',
     wsDisconnectedSuffix: '. Press Reconnect to continue.',
     gpsUnsupportedTitle: 'Sinar Warna Location & Map',
-    gpsUnsupportedDesc: 'GPS is unsupported on this device. Showing Sinar Warna main location.',
-    gpsTrafficOk: 'Smooth Traffic (Clear 32 km/h)',
+    gpsUnsupportedDesc: 'GPS is unsupported on this device. Showing Sinar Warna location.',
+    gpsTrafficOk: 'Check live traffic on Google Maps',
+    webSourcesTitle: 'Live Search Results & References',
+    openGoogleMaps: 'Open in Google Maps',
+    endingLiveNotice: 'Ending Live session...',
+    audioSpeakerLabel: 'Speaker',
+    audioEarpieceLabel: 'Earpiece',
+    audioRouteToEarpieceTooltip: 'Switch audio to earpiece',
+    audioRouteToSpeakerTooltip: 'Switch audio to speakerphone',
   },
   admin: {
     modalAria: 'Sinar Warna Administrator Panel',
@@ -810,6 +847,13 @@ const EN_TRANSLATIONS: AppTranslations = {
     maintenanceFeedbackOff: 'Maintenance Broadcast has been turned off.',
     maintenanceManualReason: 'Manually activated by Admin',
     maintenanceSimulatedError: 'Admin Broadcast Test (Simulated Limit)',
+    defaultThemeTitle: 'DEFAULT INITIAL WEB APP THEME',
+    defaultThemeDesc:
+      'Sets the initial appearance (Dark or Light) for new visitors opening Sinar Warna for the first time.',
+    defaultThemeDark: 'Dark (Default)',
+    defaultThemeLight: 'Light',
+    defaultThemeSavedDark: 'Default initial web app theme set to Dark Mode.',
+    defaultThemeSavedLight: 'Default initial web app theme set to Light Mode.',
   },
   errors: {
     emptyAiReply: 'Empty or interrupted AI response. Please try sending again.',
@@ -923,6 +967,7 @@ const ZH_TRANSLATIONS: AppTranslations = {
     newVariations: '更多创意',
     newVariationsPrompt: '基于上面的想法，提供 3 个更大胆、更详细的全新创意方案。',
     adminRawErrorBadge: '管理员调试：原始错误',
+    webSourcesLabel: '实时网页参考来源',
   },
   settings: {
     dialogAria: 'Sinar Warna 设置',
@@ -988,7 +1033,7 @@ const ZH_TRANSLATIONS: AppTranslations = {
     processingRegister: '正在注册...',
     loginWithEmail: '使用邮箱登录',
     registerAccount: '注册新账号',
-    orContinueWith: '或通过以下方式继续',
+    orContinueWith: '或使用邮箱登录/注册',
     connecting: '连接中...',
     errEnterEmail: '请输入您的邮箱地址。',
     errPasswordLength: '密码至少需要 6 位字符。',
@@ -1063,8 +1108,15 @@ const ZH_TRANSLATIONS: AppTranslations = {
     wsDisconnectedPrefix: 'AI 实时连接已断开',
     wsDisconnectedSuffix: '。请点击重新连接继续。',
     gpsUnsupportedTitle: 'Sinar Warna 位置与地图',
-    gpsUnsupportedDesc: '当前设备不支持 GPS。正在显示 Sinar Warna 中心位置。',
-    gpsTrafficOk: '路况畅通 (约 32 km/h)',
+    gpsUnsupportedDesc: '当前设备不支持 GPS。正在显示 Sinar Warna 位置。',
+    gpsTrafficOk: '在 Google Maps 查看实时路况',
+    webSourcesTitle: '实时搜索结果与参考资料',
+    openGoogleMaps: '在 Google Maps 中打开',
+    endingLiveNotice: '正在结束实时对话...',
+    audioSpeakerLabel: '扬声器',
+    audioEarpieceLabel: '听筒',
+    audioRouteToEarpieceTooltip: '切换声音至听筒',
+    audioRouteToSpeakerTooltip: '切换声音至扬声器',
   },
   admin: {
     modalAria: 'Sinar Warna 管理员面板',
@@ -1086,6 +1138,12 @@ const ZH_TRANSLATIONS: AppTranslations = {
     maintenanceFeedbackOff: '系统维护公告广播已关闭。',
     maintenanceManualReason: '由管理员手动开启',
     maintenanceSimulatedError: '管理员广播测试（模拟限流）',
+    defaultThemeTitle: '网页默认初始主题',
+    defaultThemeDesc: '设置新访客首次打开 Sinar Warna 时的默认外观（深色或浅色）。',
+    defaultThemeDark: '深色（默认）',
+    defaultThemeLight: '浅色',
+    defaultThemeSavedDark: '网页默认初始主题已设置为深色模式。',
+    defaultThemeSavedLight: '网页默认初始主题已设置为浅色模式。',
   },
   errors: {
     emptyAiReply: 'AI 回复为空或连接中断，请尝试重新发送。',

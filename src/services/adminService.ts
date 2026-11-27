@@ -849,3 +849,83 @@ export async function setFreewillMode(params: {
   }
 }
 
+export type DefaultThemeMode = 'dark' | 'light';
+
+export const ADMIN_DEFAULT_THEME_STORAGE_KEY = 'sinar-warna-admin-default-theme';
+
+export function readCachedAdminDefaultTheme(): DefaultThemeMode {
+  try {
+    if (typeof window === 'undefined') return 'dark';
+    const raw = localStorage.getItem(ADMIN_DEFAULT_THEME_STORAGE_KEY);
+    return raw === 'light' ? 'light' : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
+export function subscribeDefaultThemeConfig(
+  onData: (defaultTheme: DefaultThemeMode) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  const path = 'appConfig/theme';
+  return onSnapshot(
+    doc(db, 'appConfig', 'theme'),
+    (snap) => {
+      const nextTheme: DefaultThemeMode =
+        snap.exists() && snap.data()?.defaultTheme === 'light' ? 'light' : 'dark';
+      try {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(ADMIN_DEFAULT_THEME_STORAGE_KEY, nextTheme);
+        }
+      } catch {
+        // Ignore storage error
+      }
+      onData(nextTheme);
+    },
+    (error) => {
+      if (!onError) return;
+      try {
+        handleFirestoreError(error, OperationType.GET, path);
+      } catch (wrapped) {
+        onError(wrapped instanceof Error ? wrapped : new Error(String(wrapped)));
+      }
+    }
+  );
+}
+
+export async function saveDefaultThemeConfig(
+  adminUser: User,
+  defaultTheme: DefaultThemeMode
+): Promise<void> {
+  const path = 'appConfig/theme';
+  const ref = doc(db, 'appConfig', 'theme');
+  const cleanTheme: DefaultThemeMode = defaultTheme === 'light' ? 'light' : 'dark';
+  try {
+    const existingSnap = await getDoc(ref);
+    if (existingSnap.exists()) {
+      await updateDoc(ref, {
+        defaultTheme: cleanTheme,
+        updatedBy: sanitizeId(adminUser.uid),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await setDoc(ref, {
+        defaultTheme: cleanTheme,
+        updatedBy: sanitizeId(adminUser.uid),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(ADMIN_DEFAULT_THEME_STORAGE_KEY, cleanTheme);
+      }
+    } catch {
+      // Ignore storage error
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+

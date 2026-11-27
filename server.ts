@@ -13,8 +13,25 @@ import {
   buildContents,
   formatGeminiError,
   isTransientError,
+  selectSmartThinkingDepth,
   type IncomingMessage,
 } from './shared/sinarWarnaPrompt.ts';
+
+function formatCurrentDateText(): string {
+  try {
+    return new Intl.DateTimeFormat('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date()) + ' WIB';
+  } catch {
+    return new Date().toISOString();
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,10 +92,11 @@ async function createApp() {
     });
 
     try {
-      const { messages, mode = 'general', thinkingDepth = 'fast' } = req.body as {
+      const { messages, mode = 'general', thinkingDepth = 'fast', language = 'id' } = req.body as {
         messages?: IncomingMessage[];
         mode?: string;
         thinkingDepth?: 'fast' | 'deep';
+        language?: string;
       };
 
       if (!Array.isArray(messages) || messages.length === 0) {
@@ -102,6 +120,8 @@ async function createApp() {
         return;
       }
 
+      const effectiveDepth = thinkingDepth === 'deep' ? 'deep' : selectSmartThinkingDepth(messages);
+
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, no-transform');
       res.setHeader('Connection', 'keep-alive');
@@ -112,7 +132,9 @@ async function createApp() {
         ai,
         contents,
         mode,
-        thinkingDepth,
+        thinkingDepth: effectiveDepth,
+        language,
+        currentDateText: formatCurrentDateText(),
         authContext,
         abortSignal: abortController.signal,
         onEvent: (event) => {
@@ -231,6 +253,15 @@ async function createApp() {
     const mode = urlObj.searchParams.get('mode') || 'general';
     const token = urlObj.searchParams.get('token');
     const initialCamera = urlObj.searchParams.get('camera') === '1';
+    const language = urlObj.searchParams.get('lang') || 'id';
+    const rawLat = urlObj.searchParams.get('lat');
+    const rawLng = urlObj.searchParams.get('lng');
+    const parsedLat = rawLat !== null ? Number(rawLat) : NaN;
+    const parsedLng = rawLng !== null ? Number(rawLng) : NaN;
+    const initialUserLocation =
+      Number.isFinite(parsedLat) && Number.isFinite(parsedLng)
+        ? { lat: parsedLat, lng: parsedLng }
+        : null;
 
     let bridge: ReturnType<typeof createLiveBridge> | null = null;
     let closedByClient = false;
@@ -304,6 +335,9 @@ async function createApp() {
         ai,
         initialVoice: rawVoice,
         mode,
+        language,
+        currentDateText: formatCurrentDateText(),
+        initialUserLocation,
         initialCamera,
         authContext,
         sendJson: safeSend,

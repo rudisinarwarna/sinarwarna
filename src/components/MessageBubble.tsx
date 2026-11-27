@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertCircle, Check, Copy, RefreshCw, ShieldAlert, Sparkles, Wand2 } from 'lucide-react';
+import { AlertCircle, Check, Copy, ExternalLink, Globe, RefreshCw, ShieldAlert, Sparkles, Wand2 } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext';
 import { isQuotaOrLimitError } from '../services/maintenanceManager';
 import type { ChatMessage } from '../types/chat';
@@ -103,7 +103,31 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <div className="h-3.5 w-2/3 rounded-md bg-zinc-200/60 dark:bg-zinc-800/60 animate-pulse" />
           </div>
         ) : (
-          <MarkdownMessage content={message.text} isStreaming={isStreaming} />
+          <>
+            <MarkdownMessage content={message.text} isStreaming={isStreaming} />
+            {message.sources && message.sources.length > 0 && (
+              <div className="mt-2.5 rounded-xl border border-blue-500/20 bg-blue-50/50 dark:bg-[#141A2E]/65 px-3 py-2.5">
+                <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-blue-700 dark:text-blue-300">
+                  <Globe className="h-3.5 w-3.5" />
+                  <span>{t.messageBubble.webSourcesLabel}</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {message.sources.map((src, idx) => (
+                    <a
+                      key={`${src.uri}-${idx}`}
+                      href={src.uri}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex max-w-xs items-center gap-1.5 rounded-lg border border-black/10 dark:border-white/10 bg-white/85 dark:bg-[#0B0F1A]/80 px-2.5 py-1 text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:border-blue-500/50 hover:text-blue-600 dark:hover:text-blue-300 transition-colors"
+                    >
+                      <span className="truncate">{src.title || src.uri}</span>
+                      <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {!isStreaming && !message.error && message.text && (

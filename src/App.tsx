@@ -41,7 +41,9 @@ import {
   signOutUser,
 } from './firebase';
 import {
+  readCachedAdminDefaultTheme,
   seedDefaultAdminMemoriesOnce,
+  subscribeDefaultThemeConfig,
   subscribeFreewillConfig,
   subscribeOwnUserAccess,
   type AdminLevel,
@@ -84,6 +86,7 @@ import type {
   CreativeModeId,
   ImageAttachment,
   ThinkingDepth,
+  WebSource,
 } from './types/chat';
 
 const LEGACY_STORAGE_KEY = 'sinar-warna-chats-v1';
@@ -96,7 +99,7 @@ function loadInitialTheme(): boolean {
     const saved = localStorage.getItem(THEME_KEY);
     if (saved === 'dark') return true;
     if (saved === 'light') return false;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return readCachedAdminDefaultTheme() === 'dark';
   } catch {
     return true;
   }
@@ -160,6 +163,7 @@ export default function App() {
   const [inMemoryAttachments, setInMemoryAttachments] = useState<
     Record<string, ImageAttachment[]>
   >({});
+  const [inMemorySources, setInMemorySources] = useState<Record<string, WebSource[]>>({});
 
   const [activeConversationId, setActiveConversationId] = useState<string | null>(() =>
     cachedAuth?.isEmailVerified ? readCachedActiveConversationId(cachedAuth.uid) : null
@@ -325,6 +329,7 @@ export default function App() {
         setCloudMessagesByConv({});
         setPendingMessagesByConv({});
         setInMemoryAttachments({});
+        setInMemorySources({});
         setActiveConversationId(null);
       }
     });
@@ -474,18 +479,55 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Sync dark class on <html>
+  // Subscribe to admin-configured global default initial theme (appConfig/theme)
+  useEffect(() => {
+    const unsubscribe = subscribeDefaultThemeConfig((defaultTheme) => {
+      try {
+        const personalOverride = localStorage.getItem(THEME_KEY);
+        if (!personalOverride) {
+          setIsDark(defaultTheme === 'dark');
+        }
+      } catch {
+        setIsDark(defaultTheme === 'dark');
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleUserSetTheme = useCallback((dark: boolean) => {
+    setIsDark(dark);
+    try {
+      localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light');
+    } catch {
+      // Ignore storage error
+    }
+  }, []);
+
+  const handleUserToggleTheme = useCallback(() => {
+    setIsDark((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(THEME_KEY, next ? 'dark' : 'light');
+      } catch {
+        // Ignore storage error
+      }
+      return next;
+    });
+  }, []);
+
+  // Sync dark class, native colorScheme, and browser theme-color on <html>
   useEffect(() => {
     const root = document.documentElement;
     if (isDark) {
       root.classList.add('dark');
+      root.style.colorScheme = 'dark';
     } else {
       root.classList.remove('dark');
+      root.style.colorScheme = 'light';
     }
-    try {
-      localStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light');
-    } catch {
-      // Ignore storage error
+    const metaTheme = document.querySelector('meta[name="theme-color"]');
+    if (metaTheme) {
+      metaTheme.setAttribute('content', isDark ? '#0B0F1A' : '#FFFFFF');
     }
   }, [isDark]);
 
@@ -525,6 +567,7 @@ export default function App() {
       mergedMap.set(m.id, {
         ...m,
         attachments: inMemoryAttachments[m.id] || m.attachments,
+        sources: inMemorySources[m.id] || m.sources,
       });
     }
     for (const p of pendingList) {
@@ -533,6 +576,7 @@ export default function App() {
         mergedMap.set(p.id, {
           ...p,
           attachments: inMemoryAttachments[p.id] || p.attachments,
+          sources: inMemorySources[p.id] || p.sources,
         });
       }
     }
@@ -542,6 +586,7 @@ export default function App() {
     activeConversation,
     cloudMessagesByConv,
     inMemoryAttachments,
+    inMemorySources,
     isCloudUser,
     isStreaming,
     pendingMessagesByConv,
@@ -612,6 +657,7 @@ export default function App() {
     setCloudConversations([]);
     setLocalConversations([]);
     setInMemoryAttachments({});
+    setInMemorySources({});
     setActiveConversationId(null);
     await auth.authStateReady().catch(() => undefined);
     await signOutUser();
@@ -631,6 +677,7 @@ export default function App() {
     if (!isCloudUser) {
       setLocalConversations([]);
       setInMemoryAttachments({});
+      setInMemorySources({});
     }
   }, [isCloudUser, stopStreaming]);
 
@@ -730,6 +777,7 @@ export default function App() {
           body: JSON.stringify({
             mode,
             thinkingDepth: depth,
+            language: langRef.current,
             messages: historyForApi.map((m) => ({
               role: m.role,
               text: m.text,
@@ -775,10 +823,11 @@ export default function App() {
               const jsonText = line.slice(6).trim();
               if (!jsonText) continue;
 
-              let payload: { text?: string; error?: string; done?: boolean };
+              let payload: { text?: string; sources?: WebSource[]; error?: string; done?: boolean };
               try {
                 payload = JSON.parse(jsonText) as {
                   text?: string;
+                  sources?: WebSource[];
                   error?: string;
                   done?: boolean;
                 };
@@ -788,6 +837,34 @@ export default function App() {
 
               if (payload.error) {
                 throw new Error(payload.error);
+              }
+
+              if (Array.isArray(payload.sources) && payload.sources.length > 0) {
+                const nextSources = payload.sources;
+                setInMemorySources((prev) => ({
+                  ...prev,
+                  [modelMessageId]: nextSources,
+                }));
+                if (currentUser) {
+                  setPendingMessagesByConv((prev) => ({
+                    ...prev,
+                    [convId]: (prev[convId] || []).map((m) =>
+                      m.id === modelMessageId ? { ...m, sources: nextSources } : m
+                    ),
+                  }));
+                } else {
+                  setLocalConversations((prev) =>
+                    prev.map((c) => {
+                      if (c.id !== convId) return c;
+                      return {
+                        ...c,
+                        messages: c.messages.map((m) =>
+                          m.id === modelMessageId ? { ...m, sources: nextSources } : m
+                        ),
+                      };
+                    })
+                  );
+                }
               }
 
               if (payload.text) {
@@ -1336,7 +1413,7 @@ export default function App() {
 
             <button
               type="button"
-              onClick={() => setIsDark((prev) => !prev)}
+              onClick={handleUserToggleTheme}
               title={isDark ? t.header.switchToLight : t.header.switchToDark}
               aria-label={isDark ? t.header.switchToLight : t.header.switchToDark}
               className="hidden sm:inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-white transition-colors cursor-pointer shrink-0"
@@ -1505,7 +1582,7 @@ export default function App() {
         currentUser={user}
         lang={lang}
         onClose={() => setSettingsModalOpen(false)}
-        onSetTheme={(dark) => setIsDark(dark)}
+        onSetTheme={handleUserSetTheme}
         onSetShowLiveTranscript={(show) => setShowLiveTranscript(show)}
         onInstallAndroid={install}
         onSetLang={setLang}
@@ -1535,7 +1612,7 @@ export default function App() {
       {authModalOpen && !user && (
         <AuthScreen
           isDark={isDark}
-          onToggleTheme={() => setIsDark((prev) => !prev)}
+          onToggleTheme={handleUserToggleTheme}
           onClose={() => setAuthModalOpen(false)}
         />
       )}

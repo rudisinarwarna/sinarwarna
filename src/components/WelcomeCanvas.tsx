@@ -1,10 +1,5 @@
 import React, { useState } from 'react';
 import { useLanguage } from '../i18n/LanguageContext';
-import {
-  KoAwenAnniversaryBackdrop,
-  KoAwenAnniversaryHeader,
-  KoAwenAnniversaryNumber25,
-} from './KoAwenAnniversaryDecor';
 
 export const WelcomeCanvas: React.FC = () => {
   const [imgFailed, setImgFailed] = useState(false);
@@ -12,17 +7,12 @@ export const WelcomeCanvas: React.FC = () => {
 
   return (
     <div className="relative flex min-h-full w-full flex-col items-center justify-center overflow-hidden px-5 py-7 text-center sm:py-10">
-      <KoAwenAnniversaryBackdrop />
-
       <div className="relative z-10 mx-auto flex w-full max-w-3xl flex-col items-center">
-        {/* Festive celebratory banner above the floating Sinar Warna logo */}
-        <KoAwenAnniversaryHeader />
-
-        {/* Single large background-less Sinar Warna logo with celebratory gold + red-blue aura */}
+        {/* Single large background-less Sinar Warna logo with clean red-blue aura */}
         <div className="relative mb-5 flex items-center justify-center sm:mb-7">
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute -inset-7 rounded-full bg-gradient-to-tr from-[#E51D2B]/30 via-amber-400/25 to-[#0A36FF]/35 blur-2xl dark:from-[#E51D2B]/40 dark:via-amber-400/30 dark:to-[#0A36FF]/45"
+            className="pointer-events-none absolute -inset-7 rounded-full bg-gradient-to-tr from-[#E51D2B]/25 via-transparent to-[#0A36FF]/30 blur-2xl dark:from-[#E51D2B]/35 dark:via-transparent dark:to-[#0A36FF]/40"
           />
           <div className="relative animate-sinar-float">
             {!imgFailed ? (
@@ -55,9 +45,6 @@ export const WelcomeCanvas: React.FC = () => {
             {t.welcome.subtitle}
           </p>
         </div>
-
-        {/* Big festive 25 in the empty space below */}
-        <KoAwenAnniversaryNumber25 />
       </div>
     </div>
   );

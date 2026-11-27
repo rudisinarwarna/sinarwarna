@@ -113,16 +113,16 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-black text-white overflow-hidden"
+      className="fixed inset-0 z-50 flex flex-col bg-slate-100 text-zinc-900 dark:bg-black dark:text-white overflow-hidden transition-colors duration-200"
       role="dialog"
       aria-modal="true"
       aria-label={t.camera.dialogAria}
     >
       {/* Full-screen Edge-to-Edge Viewfinder */}
-      <div className="relative flex-1 w-full h-full bg-black flex items-center justify-center overflow-hidden">
+      <div className="relative flex-1 w-full h-full bg-zinc-200 dark:bg-black flex items-center justify-center overflow-hidden">
         {error ? (
-          <div className="flex max-w-sm flex-col items-center gap-3 px-6 text-center text-sm text-red-200">
-            <AlertCircle className="h-9 w-9 text-red-400" />
+          <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-red-200 bg-white/90 px-6 py-5 text-center text-sm text-red-700 shadow-lg dark:border-red-500/30 dark:bg-black/70 dark:text-red-200">
+            <AlertCircle className="h-9 w-9 text-[#E51D2B] dark:text-red-400" />
             <p>{error}</p>
           </div>
         ) : (
@@ -136,12 +136,12 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
         )}
 
         {/* Floating Top Overlay Controls */}
-        <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-black/75 via-black/35 to-transparent px-4 py-4 sm:px-6">
+        <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-white/80 via-white/30 to-transparent dark:from-black/75 dark:via-black/35 dark:to-transparent px-4 py-4 sm:px-6">
           <div className="flex items-center gap-2.5">
             <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-[#E51D2B] to-[#0A36FF] text-white shadow-md">
               <Camera className="h-4 w-4" />
             </span>
-            <span className="font-display text-sm font-semibold tracking-tight text-white">
+            <span className="font-display text-sm font-semibold tracking-tight text-zinc-900 dark:text-white">
               {t.camera.title}
             </span>
           </div>
@@ -154,7 +154,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
               }
               title={t.camera.switchCamera}
               aria-label={t.camera.switchCamera}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-md hover:bg-black/75 transition-colors cursor-pointer"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-zinc-200/80 bg-white/85 text-zinc-800 shadow-md backdrop-blur-md hover:bg-white dark:border-transparent dark:bg-black/50 dark:text-white dark:shadow-none dark:hover:bg-black/75 transition-colors cursor-pointer"
             >
               <SwitchCamera className="h-5 w-5" />
             </button>
@@ -166,7 +166,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
               }}
               title={t.camera.closeCamera}
               aria-label={t.camera.closeCamera}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-md hover:bg-[#E51D2B] transition-colors cursor-pointer"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-zinc-200/80 bg-white/85 text-zinc-800 shadow-md backdrop-blur-md hover:bg-[#E51D2B] hover:text-white dark:border-transparent dark:bg-black/50 dark:text-white dark:shadow-none dark:hover:bg-[#E51D2B] transition-colors cursor-pointer"
             >
               <X className="h-5 w-5" />
             </button>
@@ -174,7 +174,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
         </div>
 
         {/* Floating Bottom Shutter Bar */}
-        <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-center bg-gradient-to-t from-black/80 via-black/35 to-transparent px-5 pb-8 pt-8">
+        <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-center bg-gradient-to-t from-white/85 via-white/35 to-transparent dark:from-black/80 dark:via-black/35 dark:to-transparent px-5 pb-8 pt-8">
           <button
             type="button"
             disabled={!isReady || Boolean(error)}

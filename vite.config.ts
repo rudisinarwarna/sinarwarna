@@ -26,7 +26,7 @@ export default defineConfig(() => {
           description:
             'Asisten AI Toko Cat Sinar Warna untuk konsultasi warna, cat oplos, desain, dan obrolan suara/kamera langsung.',
           theme_color: '#0B0F1A',
-          background_color: '#0B0F1A',
+          background_color: '#ffffff',
           display: 'standalone',
           start_url: '/',
           scope: '/',
